@@ -1,0 +1,25 @@
+[project]
+name = "peritype"
+version = "0.0.1"
+description = "Peritype helps you explore Python types at runtime with ease."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.8.4,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["ruff>=0.12.7"]
+test = ["pytest>=8.4.1", "pytest-cov>=6.2.1"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+extend-select = ["E", "W", "F", "B", "Q", "I", "N", "RUF", "UP"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["I001"]
