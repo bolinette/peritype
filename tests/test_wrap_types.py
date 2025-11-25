@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Coroutine
 from typing import Annotated, Any, Concatenate, Generic, get_origin
 
 from peritype import TWrap, wrap_type
@@ -66,10 +66,10 @@ def test_match_none() -> None:
 
 
 def test_match_ellipsis() -> None:
-    class TestType[**T]:
-        pass
+    class TestType[**T]: ...
 
     assert wrap_type(TestType[...]).match(TestType[int, str])
+    assert wrap_type(TestType[int, str]).match(TestType[...])
 
     assert wrap_type(TestType[Concatenate[int, ...]]).match(TestType[Concatenate[int, ...]])
     assert not wrap_type(TestType[Concatenate[str, ...]]).match(TestType[Concatenate[int, ...]])
@@ -91,11 +91,24 @@ def test_wrap_contains_any() -> None:
     assert wrap_type(list[list[dict[str, int]]]).contains_any is False
 
 
+def test_wrap_missing_var_is_any() -> None:
+    class TestType[T]: ...
+
+    assert wrap_type(TestType) == wrap_type(TestType[Any])
+    assert wrap_type(Coroutine) == wrap_type(Coroutine[Any, Any, Any])
+
+    class TestType2[**P]: ...
+
+    assert wrap_type(TestType2) == wrap_type(TestType2[...])
+
+
 def test_wrap_paramspec_contains_any() -> None:
-    assert wrap_type(Callable[[str, int], int]).contains_any is False
-    assert wrap_type(Callable[[str, Any], int]).contains_any is True
-    assert wrap_type(Callable[[str, int], Any]).contains_any is True
-    assert wrap_type(Callable[..., int]).contains_any is True
+    class TestType[**P, T]: ...
+
+    assert wrap_type(TestType[[str, int], int]).contains_any is False
+    assert wrap_type(TestType[[str, Any], int]).contains_any is True
+    assert wrap_type(TestType[[str, int], Any]).contains_any is True
+    assert wrap_type(TestType[..., int]).contains_any is True
 
 
 def test_wrap_hash() -> None:

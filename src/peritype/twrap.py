@@ -114,6 +114,12 @@ class TypeNode[T]:
     def __hash__(self) -> int:
         return self._hash
 
+    @override
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, TypeNode):
+            return False
+        return hash(self) == hash(value)  # pyright: ignore[reportUnknownArgumentType]
+
     def __getitem__(self, index: int) -> "TWrap[Any]":
         return self.nodes[index]
 
@@ -143,7 +149,7 @@ class TypeNode[T]:
             cls_bases = getattr(self.cls, "__bases__", ())
             for base in cls_bases:
                 bases.append(peritype.wrap_type(base, lookup=self.type_var_lookup))
-        return tuple(bases)
+        return (*bases,)
 
     @cached_property
     def type_var_lookup(self) -> TypeVarLookup:
@@ -179,6 +185,12 @@ class TWrap[T]:
     @override
     def __hash__(self) -> int:
         return self._hash
+
+    @override
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, TWrap):
+            return False
+        return hash(self) == hash(value)  # pyright: ignore[reportUnknownArgumentType]
 
     @cached_property
     def _str(self) -> str:

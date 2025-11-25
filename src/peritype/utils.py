@@ -1,9 +1,12 @@
+import collections.abc
+import contextlib
 from types import UnionType
 from typing import (
     Annotated,
     Any,
     ForwardRef,
     NotRequired,
+    ParamSpec,
     TypeAliasType,
     TypeVar,
     Union,  # pyright: ignore[reportDeprecated]
@@ -74,20 +77,66 @@ def get_generics[GenT](
     return _cls, ()
 
 
-def substitute_typevars(arg: Any, lookup: dict[TypeVar, Any]) -> Any:
-    if isinstance(arg, TypeVar):
-        return lookup.get(arg, arg)
-    origin = get_origin(arg)
-    if origin is None:
-        return arg
-    args = tuple(substitute_typevars(a, lookup) for a in get_args(arg))
-    try:
-        return origin[*args]
-    except Exception:
-        return arg
-
-
 def use_cache(value: bool) -> None:
     from peritype import wrap
 
     wrap.USE_CACHE = value
+
+
+def fill_params_in(cls_: type[Any], vars: tuple[Any, ...]) -> tuple[type[Any], tuple[Any, ...]]:
+    params: tuple[Any, ...] = getattr(cls_, "__type_params__", None) or getattr(cls_, "__parameters__", None) or ()
+    if cls_ in BUILTIN_PARAM_COUNT:
+        param_count = BUILTIN_PARAM_COUNT[cls_]
+    else:
+        param_count = len(params)
+    if len(vars) >= param_count:
+        return cls_, vars
+    new_vars: list[Any] = []
+    for i in range(len(vars), param_count):
+        if i < len(params):
+            if isinstance(params[i], ParamSpec):
+                new_vars.append(...)
+            else:
+                new_vars.append(Any)
+        else:
+            new_vars.append(Any)
+    return cls_, (*vars, *new_vars)
+
+
+BUILTIN_PARAM_COUNT: dict[type[Any], int] = {
+    collections.abc.Hashable: 0,
+    collections.abc.Awaitable: 1,
+    collections.abc.Coroutine: 3,
+    collections.abc.AsyncIterable: 1,
+    collections.abc.AsyncIterator: 1,
+    collections.abc.Iterable: 1,
+    collections.abc.Iterator: 1,
+    collections.abc.Reversible: 1,
+    collections.abc.Sized: 0,
+    collections.abc.Container: 1,
+    collections.abc.Collection: 1,
+    collections.abc.Set: 1,
+    collections.abc.MutableSet: 1,
+    collections.abc.Mapping: 2,
+    collections.abc.MutableMapping: 2,
+    collections.abc.Sequence: 1,
+    collections.abc.MutableSequence: 1,
+    list: 1,
+    collections.deque: 1,
+    set: 1,
+    frozenset: 1,
+    collections.abc.MappingView: 1,
+    collections.abc.KeysView: 1,
+    collections.abc.ItemsView: 2,
+    collections.abc.ValuesView: 1,
+    contextlib.AbstractContextManager: 1,
+    contextlib.AbstractAsyncContextManager: 1,
+    dict: 2,
+    collections.defaultdict: 2,
+    collections.OrderedDict: 2,
+    collections.Counter: 1,
+    collections.ChainMap: 2,
+    collections.abc.Generator: 3,
+    collections.abc.AsyncGenerator: 2,
+    type: 1,
+}
