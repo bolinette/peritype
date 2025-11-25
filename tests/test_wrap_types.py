@@ -1,5 +1,7 @@
 from collections.abc import Coroutine
-from typing import Annotated, Any, Concatenate, Generic, get_origin
+from typing import Annotated, Any, Concatenate, Generic, NotRequired, get_origin
+
+import pytest
 
 from peritype import TWrap, wrap_type
 
@@ -20,13 +22,13 @@ def test_wrap_complex_type() -> None:
 def test_type_union() -> None:
     t_union = wrap_type(int | str)
     assert isinstance(t_union, TWrap)
-    assert t_union.is_union
-    assert not t_union.is_nullable
+    assert t_union.union
+    assert not t_union.nullable
 
     t_nullable = wrap_type(int | None)
     assert isinstance(t_nullable, TWrap)
-    assert not t_nullable.is_union
-    assert t_nullable.is_nullable
+    assert not t_nullable.union
+    assert t_nullable.nullable
 
 
 def test_match_union_to_type() -> None:
@@ -182,3 +184,93 @@ def test_super_transversal_generic_type_bases() -> None:
     assert len(bases) == 2
     assert bases[0].match(Super[int])
     assert get_origin(bases[1].origin) is Generic
+
+
+def test_type_attributes() -> None:
+    class GenericType[T, U]:
+        attr1: T
+        attr2: U
+        attr3: int
+
+    tw = wrap_type(GenericType[int, str])
+    attrs = tw.attribute_hints
+    assert attrs["attr1"].match(int)
+    assert attrs["attr2"].match(str)
+    assert attrs["attr3"].match(int)
+
+
+def test_type_attributes_with_inherited() -> None:
+    class BaseType1[T]:
+        base_attr_1: T
+
+    class BaseType2[T]:
+        base_attr_2: T
+
+    class MidType[T, U](BaseType1[U]):
+        mid_attr: T
+
+    class GenericType[T, U](MidType[U, int], BaseType2[T]):
+        attr1: T
+        attr2: U
+
+    tw = wrap_type(GenericType[str, bool])
+    attrs = tw.attribute_hints
+    assert attrs["attr1"].match(str)
+    assert attrs["attr2"].match(bool)
+    assert attrs["mid_attr"].match(bool)
+    assert attrs["base_attr_1"].match(int)
+    assert attrs["base_attr_2"].match(str)
+
+
+def test_type_attributes_no_atomic() -> None:
+    t_union = wrap_type(int | str)
+    with pytest.raises(TypeError) as info:
+        _ = t_union.attribute_hints
+
+    assert info.value.args[0] == "Cannot get attributes of union types"
+
+
+def test_type_init_signature() -> None:
+    class GenericType[T, U]:
+        def __init__(self, a: T, b: U) -> None:
+            pass
+
+    twrap = wrap_type(GenericType[int, str])
+    signature_hints = twrap.init.get_signature_hints()
+    assert signature_hints["a"].match(int)
+    assert signature_hints["b"].match(str)
+    assert signature_hints["return"].match(type(None))
+
+
+def test_type_method_signature() -> None:
+    class GenericType[T, U]:
+        def method(self, x: T, y: U) -> bool:
+            return True
+
+    twrap = wrap_type(GenericType[int, str])
+    fwrap = twrap.get_method_hints("method")
+
+    assert fwrap is not None
+    signature_hints = fwrap.get_signature_hints()
+    assert signature_hints["x"].match(int)
+    assert signature_hints["y"].match(str)
+    assert signature_hints["return"].match(bool)
+    assert fwrap.get_return_hint().match(bool)
+
+
+def test_typed_dict_wrap() -> None:
+    from typing import TypedDict
+
+    class TestTypedDict(TypedDict, total=False):
+        x: int
+        y: NotRequired[str]
+
+    twrap = wrap_type(TestTypedDict)
+    assert not twrap.total
+
+    attrs = twrap.attribute_hints
+    assert attrs["x"].match(int)
+    assert attrs["y"].match(str)
+
+    assert attrs["x"].required
+    assert not attrs["y"].required

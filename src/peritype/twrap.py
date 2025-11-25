@@ -1,9 +1,13 @@
 from collections.abc import Callable, Iterator
 from functools import cached_property
 from types import NoneType
-from typing import Any, ForwardRef, Literal, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, ForwardRef, Literal, TypeVar, cast, get_type_hints, override
 
 import peritype
+from peritype.errors import PeritypeError
+
+if TYPE_CHECKING:
+    from peritype.fwrap import BoundFWrap
 
 
 class TWrapMeta:
@@ -177,6 +181,7 @@ class TWrap[T]:
         self._origin = origin
         self._nodes = nodes
         self._meta = meta
+        self._method_cache: dict[str, BoundFWrap[..., Any]] = {}
 
     @cached_property
     def _hash(self) -> int:
@@ -228,6 +233,10 @@ class TWrap[T]:
     def total(self) -> bool:
         return self._meta.total
 
+    @cached_property
+    def annotations(self) -> tuple[Any, ...]:
+        return self._meta.annotated
+
     @property
     def nodes(self) -> tuple["TypeNode[Any]", ...]:
         return self._nodes
@@ -244,12 +253,67 @@ class TWrap[T]:
         return any(node.contains_any for node in self._nodes)
 
     @cached_property
-    def is_union(self) -> bool:
+    def union(self) -> bool:
         return len([n for n in self._nodes if n.cls is not NoneType]) > 1
 
     @cached_property
-    def is_nullable(self) -> bool:
+    def nullable(self) -> bool:
         return any(n.cls is NoneType for n in self._nodes)
+
+    @cached_property
+    def attribute_hints(self) -> "dict[str, TWrap[Any]]":
+        if self.union:
+            raise TypeError("Cannot get attributes of union types")
+        attrs: dict[str, TWrap[Any]] = {}
+        for node in self._nodes:
+            if node.cls is NoneType:
+                continue
+            attrs |= self._get_recursive_attribute_hints(node.cls)
+        return attrs
+
+    def _get_recursive_attribute_hints(self, cls: type[Any]) -> "dict[str, TWrap[Any]]":
+        attr_hints: dict[str, TWrap[Any]] = {}
+        try:
+            for base in cls.__bases__:
+                attr_hints |= self._get_recursive_attribute_hints(base)
+            raw_ints: dict[str, type[Any] | TypeVar] = get_type_hints(cls, include_extras=True)
+            for attr_name, hint in raw_ints.items():
+                if isinstance(hint, TypeVar):
+                    if hint in self.type_var_lookup:
+                        attr_hints[attr_name] = peritype.wrap_type(self.type_var_lookup[hint])
+                    else:
+                        raise PeritypeError(f"TypeVar ~{hint.__name__} could not be found in lookup", cls=cls)
+                else:
+                    attr_hints[attr_name] = peritype.wrap_type(hint, lookup=self.type_var_lookup)
+        except (AttributeError, TypeError, NameError):
+            return attr_hints
+        return attr_hints
+
+    @cached_property
+    def init(self) -> "BoundFWrap[..., Any]":
+        if self.union:
+            raise TypeError("Cannot get __init__ of union types")
+        for node in self._nodes:
+            if hasattr(node.cls, "__init__"):
+                init_func = node.cls.__init__
+                fwrap = peritype.wrap_func(init_func)
+                bound_fwrap = fwrap.bind(self)
+                return bound_fwrap
+        raise TypeError("No __init__ method found in type nodes")
+
+    def get_method_hints(self, method_name: str) -> "BoundFWrap[..., Any]":
+        if self.union:
+            raise TypeError("Cannot get methods of union types")
+        if method_name in self._method_cache:
+            return self._method_cache[method_name]
+        for node in self._nodes:
+            if hasattr(node.cls, method_name):
+                method_func = getattr(node.cls, method_name)
+                fwrap = peritype.wrap_func(method_func)
+                bound_fwrap = fwrap.bind(self)
+                self._method_cache[method_name] = bound_fwrap
+                return bound_fwrap
+        raise AttributeError(f"Method '{method_name}' not found in type nodes")
 
     def match(self, other: Any) -> bool:
         other_wrap: TWrap[Any]

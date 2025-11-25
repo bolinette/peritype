@@ -30,6 +30,7 @@ def unpack_annotations(cls: Any, meta: TWrapMeta) -> Any:
     if origin is NotRequired:
         meta.required = False
         return unpack_annotations(get_args(cls)[0], meta)
+    meta.total = getattr(cls, "__total__", True)
     return cls
 
 

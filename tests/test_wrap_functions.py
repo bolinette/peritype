@@ -11,13 +11,13 @@ def test_wrap_basic_func() -> None:
     assert "y" in parameters
     assert fwrap.param_at(0).annotation is int
     assert fwrap.param_at(1).annotation is str
-    assert fwrap.annotation(0).match(int)
-    assert fwrap.annotation(1).match(str)
-    annotations = fwrap.annotations()
-    assert annotations["x"].match(int)
-    assert annotations["y"].match(str)
-    assert annotations["return"].match(bool)
-    assert fwrap.return_type.match(bool)
+    assert fwrap.get_signature_hint(0).match(int)
+    assert fwrap.get_signature_hint(1).match(str)
+    signature_hints = fwrap.get_signature_hints()
+    assert signature_hints["x"].match(int)
+    assert signature_hints["y"].match(str)
+    assert signature_hints["return"].match(bool)
+    assert fwrap.get_return_hint().match(bool)
 
 
 def test_wrap_init_with_typevar() -> None:
@@ -27,9 +27,9 @@ def test_wrap_init_with_typevar() -> None:
     twrap = wrap_type(TestType[int])
     fwrap = wrap_func(getattr(TestType, "__init__"))  # noqa: B009
 
-    annotations = fwrap.annotations(belongs_to=twrap)
-    assert annotations["value"].match(int)
-    assert annotations["return"].match(None)
+    signature_hints = fwrap.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(int)
+    assert signature_hints["return"].match(None)
 
 
 def test_wrap_init_with_typevar_in_super() -> None:
@@ -47,15 +47,15 @@ def test_wrap_init_with_typevar_in_super() -> None:
     fwrap_super = wrap_func(getattr(Super, "__init__"))  # noqa: B009
     fwrap_super_super = wrap_func(getattr(SuperSuper, "__init__"))  # noqa: B009
 
-    annotations = fwrap_child.annotations(belongs_to=twrap)
-    assert annotations["value"].match(bool)
-    assert annotations["return"].match(None)
-    annotations = fwrap_super.annotations(belongs_to=twrap)
-    assert annotations["value"].match(int)
-    assert annotations["return"].match(None)
-    annotations = fwrap_super_super.annotations(belongs_to=twrap)
-    assert annotations["value"].match(float)
-    assert annotations["return"].match(None)
+    signature_hints = fwrap_child.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(bool)
+    assert signature_hints["return"].match(None)
+    signature_hints = fwrap_super.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(int)
+    assert signature_hints["return"].match(None)
+    signature_hints = fwrap_super_super.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(float)
+    assert signature_hints["return"].match(None)
 
 
 def test_wrap_init_with_transversal_typevar_in_super() -> None:
@@ -79,15 +79,15 @@ def test_wrap_init_with_transversal_typevar_in_super() -> None:
     fwrap_super = wrap_func(getattr(Super, "__init__"))  # noqa: B009
     fwrap_super_super = wrap_func(getattr(SuperSuper, "__init__"))  # noqa: B009
 
-    annotations = fwrap_child.annotations(belongs_to=twrap)
-    assert annotations["value"].match(P1)
-    assert annotations["return"].match(None)
-    annotations = fwrap_super.annotations(belongs_to=twrap)
-    assert annotations["value"].match(P2)
-    assert annotations["return"].match(None)
-    annotations = fwrap_super_super.annotations(belongs_to=twrap)
-    assert annotations["value"].match(P3)
-    assert annotations["return"].match(None)
+    signature_hints = fwrap_child.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(P1)
+    assert signature_hints["return"].match(None)
+    signature_hints = fwrap_super.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(P2)
+    assert signature_hints["return"].match(None)
+    signature_hints = fwrap_super_super.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(P3)
+    assert signature_hints["return"].match(None)
 
 
 def test_wrap_init_with_union() -> None:
@@ -105,9 +105,10 @@ def test_wrap_init_with_union() -> None:
     fwrap1 = wrap_func(getattr(TestType1, "__init__"))  # noqa: B009
     fwrap2 = wrap_func(getattr(TestType2, "__init__"))  # noqa: B009
 
-    annotations = fwrap1.annotations(belongs_to=twrap)
-    assert annotations["value"].match(P1)
-    assert annotations["return"].match(None)
-    annotations = fwrap2.annotations(belongs_to=twrap)
-    assert annotations["value"].match(P2)
-    assert annotations["return"].match(None)
+    signature_hints = fwrap1.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(P1)
+    assert signature_hints["return"].match(None)
+
+    signature_hints = fwrap2.get_signature_hints(belongs_to=twrap)
+    assert signature_hints["value"].match(P2)
+    assert signature_hints["return"].match(None)
