@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any, overload
 
 from peritype.twrap import TWrap
@@ -21,6 +22,9 @@ class TypeMap[K, V]:
 
     def __len__(self) -> int:
         return len(self._content)
+
+    def __iter__(self) -> Iterator[tuple[TWrap[K], V]]:
+        yield from self._content.items()
 
     @overload
     def get[D](self, twrap: TWrap[K], /, *, default: D) -> V | D: ...

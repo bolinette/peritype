@@ -71,58 +71,23 @@ class FWrap[**FuncP, FuncT]:
     def __hash__(self) -> int:
         return hash(self.func)
 
-    def bind(self, bound_to: "TWrap[Any]") -> "BoundFWrap[FuncP, FuncT]":
-        return BoundFWrap(self, bound_to)
+    def bind(self, belongs_to: "TWrap[Any]") -> "BoundFWrap[FuncP, FuncT]":
+        return BoundFWrap(self.func, belongs_to)
 
 
-class BoundFWrap[**FWrapP, FWrapT]:
-    def __init__(self, fwrap: FWrap[FWrapP, FWrapT], bound_to: "TWrap[Any]") -> None:
-        self._fwrap = fwrap
-        self._bound_to = bound_to
-
-    @property
-    def name(self) -> str:
-        return self.inner.name
-
-    @property
-    def inner(self) -> FWrap[FWrapP, FWrapT]:
-        return self._fwrap
-
-    @property
-    def bound_to(self) -> "TWrap[Any]":
-        return self._bound_to
-
-    @property
-    def func(self) -> Callable[FWrapP, FWrapT]:
-        return self.inner.func
-
-    @property
-    def parameters(self) -> dict[str, inspect.Parameter]:
-        return self.inner.parameters
-
-    def param_at(self, index: int) -> inspect.Parameter:
-        return self.inner.param_at(index)
-
-    def get_signature_hints(self) -> dict[str, TWrap[Any]]:
-        return self._fwrap.get_signature_hints(self._bound_to)
-
-    def get_signature_hint(self, index: int) -> "TWrap[Any]":
-        return self.get_signature_hints()[self.param_at(index).name]
-
-    def get_return_hint(self) -> "TWrap[FWrapT]":
-        return self.inner.get_return_hint(self.bound_to)
-
-    def __call__(self, *args: FWrapP.args, **kwargs: FWrapP.kwargs) -> FWrapT:  # type: ignore[misc]
-        return self.inner(*args, **kwargs)
+class BoundFWrap[**FuncP, FuncT](FWrap[FuncP, FuncT]):
+    def __init__(self, func: Callable[FuncP, FuncT], belongs_to: "TWrap[Any]") -> None:
+        super().__init__(func)
+        self._belongs_to = belongs_to
 
     @override
-    def __str__(self) -> str:
-        return str(self.inner)
+    def get_signature_hints(self, belongs_to: "TWrap[Any] | None" = None) -> "dict[str, TWrap[Any]]":
+        return super().get_signature_hints(belongs_to=belongs_to or self._belongs_to)
 
     @override
-    def __repr__(self) -> str:
-        return repr(self.inner)
+    def get_signature_hint(self, index: int, belongs_to: "TWrap[Any] | None" = None) -> "TWrap[Any]":
+        return super().get_signature_hint(index, belongs_to=belongs_to or self._belongs_to)
 
     @override
-    def __hash__(self) -> int:
-        return hash(self.inner)
+    def get_return_hint(self, belongs_to: "TWrap[Any] | None" = None) -> "TWrap[FuncT]":
+        return super().get_return_hint(belongs_to=belongs_to or self._belongs_to)
