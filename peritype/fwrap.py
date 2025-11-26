@@ -1,5 +1,6 @@
 import inspect
 from collections.abc import Callable
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, get_type_hints, override
 
 from peritype.twrap import TWrap
@@ -15,20 +16,18 @@ class FWrap[**FuncP, FuncT]:
         self.func = func
         self.bound_to = getattr(self.func, "__self__", None)
         self._signature_hints: dict[str, Any] | None = None
-        self._signature: inspect.Signature | None = None
-        self._parameters: dict[str, inspect.Parameter] | None = None
 
     @property
     def name(self) -> str:
         return self.func.__name__ if hasattr(self.func, "__name__") else str(self.func)
 
-    @property
+    @cached_property
+    def signature(self) -> inspect.Signature:
+        return inspect.signature(self.func)
+
+    @cached_property
     def parameters(self) -> dict[str, inspect.Parameter]:
-        if self._parameters is None:
-            if self._signature is None:
-                self._signature = inspect.signature(self.func)
-            self._parameters = {**self._signature.parameters}
-        return self._parameters
+        return {**self.signature.parameters}
 
     def param_at(self, index: int) -> inspect.Parameter:
         all_params = [*self.parameters.values()]

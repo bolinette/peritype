@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Callable, Iterator
 from functools import cached_property
 from types import NoneType
@@ -300,6 +301,19 @@ class TWrap[T]:
                 bound_fwrap = fwrap.bind(self)
                 return bound_fwrap
         raise TypeError("No __init__ method found in type nodes")
+
+    @cached_property
+    def signature(self) -> inspect.Signature:
+        if self.union:
+            raise TypeError("Cannot get signature of union types")
+        for node in self._nodes:
+            if hasattr(node.cls, "__init__"):
+                return inspect.signature(node.cls)
+        raise TypeError("No __init__ method found in type nodes")
+
+    @cached_property
+    def parameters(self) -> dict[str, inspect.Parameter]:
+        return {**self.signature.parameters}
 
     def get_method_hints(self, method_name: str) -> "BoundFWrap[..., Any]":
         if self.union:

@@ -274,3 +274,25 @@ def test_typed_dict_wrap() -> None:
 
     assert attrs["x"].required
     assert not attrs["y"].required
+
+
+def test_type_signature() -> None:
+    class GenericType[T, U]:
+        def __init__(self, a: T, b: U) -> None:
+            pass
+
+    twrap = wrap_type(GenericType[int, str])
+    signature = twrap.signature
+    params = [*twrap.parameters.values()]
+
+    assert params[0].name == "a"
+    assert params[1].name == "b"
+    assert signature.return_annotation is None
+
+    signature = twrap.init.signature
+    params = [*twrap.init.parameters.values()]
+
+    assert params[0].name == "self"
+    assert params[1].name == "a"
+    assert params[2].name == "b"
+    assert signature.return_annotation is None
