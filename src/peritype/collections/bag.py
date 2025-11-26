@@ -27,16 +27,14 @@ class TypeBag:
     def get_all(self, twrap: TWrap[Any]) -> set[TWrap[Any]]:
         if not twrap.contains_any:
             return {twrap} if twrap in self._bag else set()
-        candidates = set[TWrap[Any]]()
+        result = set[TWrap[Any]]()
 
         def _for_nodes(node: TypeNode[Any]) -> None:
             raw_type = node.cls
             if raw_type in self._raw_types:
-                candidates.update(self._raw_types[raw_type])
+                for wrap in self._raw_types[raw_type]:
+                    if twrap.match(wrap):
+                        result.add(wrap)
 
         twrap.__visit__(for_nodes=_for_nodes)
-        result = set[TWrap[Any]]()
-        for candidate in candidates:
-            if twrap.match(candidate):
-                result.add(candidate)
         return result

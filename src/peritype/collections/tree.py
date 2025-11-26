@@ -1,12 +1,12 @@
 from typing import Any, ForwardRef, Generic, get_origin
 
-from peritype.collections import TypeMap
+from peritype.collections import TypeSetMap
 from peritype.wrap import TWrap, TypeNode
 
 
 class TypeSuperTree:
     def __init__(self) -> None:
-        self._content: TypeMap = TypeMap()
+        self._content = TypeSetMap[Any, TWrap[Any]]()
 
     def add(self, twrap: TWrap[Any]) -> None:
         bases = set[TWrap[Any]]()

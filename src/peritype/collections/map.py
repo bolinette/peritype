@@ -1,73 +1,55 @@
-from typing import Any, Literal, overload
+from typing import Any, overload
 
 from peritype.twrap import TWrap
 
 
-class TypeMap:
+class TypeMap[K, V]:
     def __init__(self) -> None:
-        self._content: dict[TWrap[Any], set[Any]] = {}
+        self._content: dict[TWrap[K], V] = {}
 
     def __contains__(self, twrap: TWrap[Any], /) -> bool:
         return twrap in self._content
 
-    def __getitem__(self, twrap: TWrap[Any], /) -> set[Any]:
+    def __getitem__(self, twrap: TWrap[K], /) -> V:
         return self._content[twrap]
 
-    def __setitem__(self, twrap: TWrap[Any], /, value: set[Any]) -> None:
+    def __setitem__(self, twrap: TWrap[K], value: V, /) -> None:
         self._content[twrap] = value
 
-    def __delitem__(self, twrap: TWrap[Any], /) -> None:
+    def __delitem__(self, twrap: TWrap[K], /) -> None:
         del self._content[twrap]
 
-    @overload
-    def get[T](
-        self,
-        twrap: TWrap[Any],
-        /,
-        *,
-        not_none: Literal[False] = False,
-        hint: type[T] | TWrap[T],
-    ) -> set[T] | None: ...
-    @overload
-    def get[T](
-        self,
-        twrap: TWrap[Any],
-        /,
-        *,
-        not_none: Literal[True],
-        hint: type[T] | TWrap[T],
-    ) -> set[T]: ...
-    @overload
-    def get(
-        self,
-        twrap: TWrap[Any],
-        /,
-        *,
-        not_none: Literal[False] = False,
-        hint: type[Any] | TWrap[Any] | None = None,
-    ) -> set[Any] | None: ...
-    @overload
-    def get(
-        self,
-        twrap: TWrap[Any],
-        /,
-        *,
-        not_none: Literal[True],
-        hint: type[Any] | TWrap[Any] | None = None,
-    ) -> set[Any] | None: ...
-    def get(
-        self,
-        twrap: TWrap[Any],
-        /,
-        *,
-        not_none: bool = False,
-        hint: type[Any] | TWrap[Any] | None = None,
-    ) -> set[Any] | None:
-        if not_none and twrap not in self._content:
-            return set()
-        return self._content.get(twrap)
+    def __len__(self) -> int:
+        return len(self._content)
 
-    def push(self, twrap: TWrap[Any], value: Any) -> None:
+    @overload
+    def get[D](self, twrap: TWrap[K], /, *, default: D) -> V | D: ...
+    @overload
+    def get(
+        self,
+        twrap: TWrap[K],
+        /,
+    ) -> V | None: ...
+    def get(
+        self,
+        twrap: TWrap[K],
+        /,
+        *,
+        default: Any = None,
+    ) -> Any:
+        return self._content.get(twrap, default)
+
+    def add(self, twrap: TWrap[K], value: V, /) -> None:
+        self._content[twrap] = value
+
+
+class TypeSetMap[K, V](TypeMap[K, set[V]]):
+    def push(self, twrap: TWrap[K], value: V, /) -> None:
         if twrap not in self._content:
             self._content[twrap] = set()
         self._content[twrap].add(value)
+
+    def count(self, twrap: TWrap[K], /) -> int:
+        if twrap not in self._content:
+            return 0
+        return len(self._content[twrap])
