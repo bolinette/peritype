@@ -296,3 +296,26 @@ def test_type_signature() -> None:
     assert params[1].name == "a"
     assert params[2].name == "b"
     assert signature.return_annotation is None
+
+
+def test_type_instantiate() -> None:
+    class GenericType[T, U]:
+        def __init__(self, a: T, b: U) -> None:
+            self.a = a
+            self.b = b
+
+    twrap = wrap_type(GenericType[int, str])
+    instance = twrap.instantiate(10, "test")
+
+    assert isinstance(instance, GenericType)
+    assert instance.a == 10
+    assert instance.b == "test"
+
+
+def test_fail_type_instantiate_union() -> None:
+    t_union = wrap_type(int | str)
+
+    with pytest.raises(TypeError) as info:
+        _ = t_union.instantiate()
+
+    assert info.value.args[0] == "Cannot instantiate union types"

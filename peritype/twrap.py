@@ -315,6 +315,14 @@ class TWrap[T]:
     def parameters(self) -> dict[str, inspect.Parameter]:
         return {**self.signature.parameters}
 
+    def instantiate(self, /, *args: Any, **kwargs: Any) -> T:
+        if self.union:
+            raise TypeError("Cannot instantiate union types")
+        for node in self._nodes:
+            if hasattr(node.cls, "__init__"):
+                return node.cls(*args, **kwargs)
+        raise TypeError("No __init__ method found in type nodes")
+
     def get_method_hints(self, method_name: str) -> "BoundFWrap[..., Any]":
         if self.union:
             raise TypeError("Cannot get methods of union types")
