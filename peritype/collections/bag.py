@@ -38,3 +38,9 @@ class TypeBag:
 
         twrap.__visit__(for_nodes=_for_nodes)
         return result
+
+    def copy(self) -> "TypeBag":
+        new_bag = TypeBag()
+        new_bag._bag = self._bag.copy()
+        new_bag._raw_types = {k: v.copy() for k, v in self._raw_types.items()}
+        return new_bag

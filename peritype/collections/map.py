@@ -46,6 +46,11 @@ class TypeMap[K, V]:
     def add(self, twrap: TWrap[K], value: V, /) -> None:
         self._content[twrap] = value
 
+    def copy(self) -> "TypeMap[K, V]":
+        new_map = TypeMap[K, V]()
+        new_map._content = self._content.copy()
+        return new_map
+
 
 class TypeSetMap[K, V](TypeMap[K, set[V]]):
     def push(self, twrap: TWrap[K], value: V, /) -> None:

@@ -45,3 +45,8 @@ class TypeSuperTree:
                 TypeSuperTree._recurse_all_bases(base, seen)
 
         twrap.__visit__(for_nodes=_for_nodes)
+
+    def copy(self) -> "TypeSuperTree":
+        new_tree = TypeSuperTree()
+        new_tree._content = self._content.copy()
+        return new_tree
