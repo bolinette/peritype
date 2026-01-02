@@ -319,3 +319,24 @@ def test_fail_type_instantiate_union() -> None:
         _ = t_union.instantiate()
 
     assert info.value.args[0] == "Cannot instantiate union types"
+
+
+def test_get_inner_type() -> None:
+    class GenericType[T]:
+        pass
+
+    twrap = wrap_type(GenericType[int])
+
+    assert twrap.inner_type is GenericType
+    assert twrap.generic_params[0].match(int)
+
+
+def test_wrap_type_alias() -> None:
+    type MyType = dict[str, list[int | str]]  # pyright: ignore[reportGeneralTypeIssues]
+
+    twrap = wrap_type(MyType)
+
+    assert twrap.match(dict)
+    assert twrap.generic_params[0].match(str)
+    assert twrap.generic_params[1].match(list)
+    assert twrap.generic_params[1].generic_params[0].match(int | str)

@@ -315,6 +315,21 @@ class TWrap[T]:
     def parameters(self) -> dict[str, inspect.Parameter]:
         return {**self.signature.parameters}
 
+    @cached_property
+    def inner_type(self) -> Any:
+        if self.union:
+            raise TypeError("Cannot get inner type of union types")
+        for node in self._nodes:
+            return node.cls
+
+    @cached_property
+    def generic_params(self) -> "tuple[TWrap[Any], ...]":
+        if self.union:
+            raise TypeError("Cannot get generic params of union types")
+        for node in self._nodes:
+            return node.nodes
+        return ()
+
     def instantiate(self, /, *args: Any, **kwargs: Any) -> T:
         if self.union:
             raise TypeError("Cannot instantiate union types")
