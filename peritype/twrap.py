@@ -8,7 +8,7 @@ import peritype
 from peritype.errors import PeritypeError
 
 if TYPE_CHECKING:
-    from peritype.fwrap import BoundFWrap
+    from peritype.fwrap import BoundFWrap, FWrap
 
 
 class TWrapMeta:
@@ -74,14 +74,30 @@ class TypeNode[T]:
     def __init__(
         self,
         origin: Any,
-        nodes: "tuple[TWrap[Any], ...]",
-        cls: type[T],
-        vars: tuple[Any, ...],
+        generic_params: "tuple[TWrap[Any], ...]",
+        inner_type: type[T],
+        origin_params: tuple[Any, ...],
     ) -> None:
-        self.origin = origin
-        self.nodes = nodes
-        self.cls = cls
-        self.vars = vars
+        self._origin = origin
+        self._generic_params = generic_params
+        self._inner_type = inner_type
+        self._origin_params = origin_params
+
+    @property
+    def origin(self) -> Any:
+        return self._origin
+
+    @property
+    def generic_params(self) -> "tuple[TWrap[Any], ...]":
+        return self._generic_params
+
+    @property
+    def inner_type(self) -> type[T]:
+        return self._inner_type
+
+    @property
+    def origin_params(self) -> tuple[Any, ...]:
+        return self._origin_params
 
     @staticmethod
     def _format_type(v: Any) -> str:
@@ -99,9 +115,9 @@ class TypeNode[T]:
 
     @cached_property
     def _str(self) -> str:
-        if not self.vars:
-            return self._format_type(self.cls)
-        return f"{self._format_type(self.cls)}[{', '.join(map(self._format_type, self.vars))}]"
+        if not self._origin_params:
+            return self._format_type(self._inner_type)
+        return f"{self._format_type(self._inner_type)}[{', '.join(map(self._format_type, self._origin_params))}]"
 
     @override
     def __str__(self) -> str:
@@ -113,7 +129,7 @@ class TypeNode[T]:
 
     @cached_property
     def _hash(self) -> int:
-        return hash((self.cls, self.nodes))
+        return hash((self._inner_type, self._generic_params))
 
     @override
     def __hash__(self) -> int:
@@ -126,19 +142,19 @@ class TypeNode[T]:
         return hash(self) == hash(value)  # pyright: ignore[reportUnknownArgumentType]
 
     def __getitem__(self, index: int) -> "TWrap[Any]":
-        return self.nodes[index]
+        return self._generic_params[index]
 
     @cached_property
     def base_name(self) -> str:
-        return self._format_type(self.cls)
+        return self._format_type(self._inner_type)
 
     @cached_property
     def contains_any(self) -> bool:
-        if self.cls is Any or self.cls is Ellipsis:  # pyright: ignore[reportUnnecessaryComparison]
+        if self._inner_type is Any or self._inner_type is Ellipsis:  # pyright: ignore[reportUnnecessaryComparison]
             return True
-        if isinstance(self.cls, tuple) and Any in self.cls:
+        if isinstance(self._inner_type, tuple) and Any in self._inner_type:
             return True
-        for node in self.nodes:
+        for node in self._generic_params:
             if node.contains_any:
                 return True
         return False
@@ -146,29 +162,105 @@ class TypeNode[T]:
     @cached_property
     def bases(self) -> tuple["TWrap[Any]", ...]:
         bases: list[TWrap[Any]] = []
-        if hasattr(self.cls, "__orig_bases__"):
-            origin_bases: tuple[type[Any], ...] = getattr(self.cls, "__orig_bases__", ())
+        if hasattr(self._inner_type, "__orig_bases__"):
+            origin_bases: tuple[type[Any], ...] = getattr(self._inner_type, "__orig_bases__", ())
             for base in origin_bases:
                 bases.append(peritype.wrap_type(base, lookup=self.type_var_lookup))
-        elif hasattr(self.cls, "__bases__"):
-            cls_bases = getattr(self.cls, "__bases__", ())
+        elif hasattr(self._inner_type, "__bases__"):
+            cls_bases = getattr(self._inner_type, "__bases__", ())
             for base in cls_bases:
                 bases.append(peritype.wrap_type(base, lookup=self.type_var_lookup))
         return (*bases,)
 
     @cached_property
     def type_var_lookup(self) -> TypeVarLookup:
-        parameters = getattr(self.cls, "__type_params__", None) or getattr(self.cls, "__parameters__", None)
-        origin_lookup = dict(zip(parameters, self.vars, strict=True)) if parameters else {}
-        twrap_lookup = dict(zip(parameters, self.nodes, strict=True)) if parameters else {}
+        parameters = getattr(self._inner_type, "__type_params__", None) or getattr(
+            self._inner_type, "__parameters__", None
+        )
+        origin_lookup = dict(zip(parameters, self._origin_params, strict=True)) if parameters else {}
+        twrap_lookup = dict(zip(parameters, self._generic_params, strict=True)) if parameters else {}
         lookup = TypeVarLookup(origin_lookup, twrap_lookup)
         base_lookup = TypeVarLookup({}, {})
-        if hasattr(self.cls, "__orig_bases__"):
-            origin_bases: tuple[type[Any], ...] = getattr(self.cls, "__orig_bases__", ())
+        if hasattr(self._inner_type, "__orig_bases__"):
+            origin_bases: tuple[type[Any], ...] = getattr(self._inner_type, "__orig_bases__", ())
             for base in origin_bases:
                 base_wrap = peritype.wrap_type(base, lookup=lookup)
                 base_lookup |= base_wrap.type_var_lookup
         return base_lookup | lookup
+
+    @cached_property
+    def attribute_hints(self) -> "dict[str, TWrap[Any]]":
+        if self._inner_type is NoneType:
+            return {}
+        return self._get_recursive_attribute_hints(self._inner_type)
+
+    def _get_recursive_attribute_hints(self, cls: type[Any]) -> "dict[str, TWrap[Any]]":
+        attr_hints: dict[str, TWrap[Any]] = {}
+        try:
+            for base in cls.__bases__:
+                attr_hints |= self._get_recursive_attribute_hints(base)
+            raw_ints: dict[str, type[Any] | TypeVar] = get_type_hints(cls, include_extras=True)
+            for attr_name, hint in raw_ints.items():
+                if isinstance(hint, TypeVar):
+                    if hint in self.type_var_lookup:
+                        attr_hints[attr_name] = peritype.wrap_type(self.type_var_lookup[hint])
+                    else:
+                        raise PeritypeError(f"TypeVar ~{hint.__name__} could not be found in lookup", cls=cls)
+                else:
+                    attr_hints[attr_name] = peritype.wrap_type(hint, lookup=self.type_var_lookup)
+        except (AttributeError, TypeError, NameError):
+            return attr_hints
+        return attr_hints
+
+    @cached_property
+    def init(self) -> "FWrap[..., Any]":
+        if not hasattr(self._inner_type, "__init__"):
+            raise TypeError("No __init__ method found in type nodes")
+        init_func = self._inner_type.__init__
+        return peritype.wrap_func(init_func)
+
+    @cached_property
+    def signature(self) -> inspect.Signature:
+        return self.init.signature
+
+    @cached_property
+    def parameters(self) -> dict[str, inspect.Parameter]:
+        return {**self.signature.parameters}
+
+    def instantiate(self, /, *args: Any, **kwargs: Any) -> T:
+        return self._inner_type(*args, **kwargs)
+
+    def get_method(self, method_name: str) -> "FWrap[..., Any]":
+        if not hasattr(self._inner_type, method_name):
+            raise AttributeError(f"Method '{method_name}' not found")
+        method_func = getattr(self._inner_type, method_name)
+        return peritype.wrap_func(method_func)
+
+    def match(self, other: "TWrap[Any]") -> bool:
+        for other_node in other.nodes:
+            if self._nodes_intersect(other_node):
+                return True
+        return False
+
+    def _nodes_intersect(self, b: "TypeNode[Any]") -> bool:
+        if self._origin is Any or b._origin is Any:
+            return True
+        if self._origin is Ellipsis or b._origin is Ellipsis:
+            return True
+
+        if self._inner_type is not b._inner_type:
+            return False
+
+        if not self._generic_params and not b._generic_params:
+            return True
+
+        if len(self._generic_params) != len(b._generic_params):
+            return False
+
+        for i in range(len(self._generic_params)):
+            if not self._generic_params[i].match(b._generic_params[i]):
+                return False
+        return True
 
 
 class TWrap[T]:
@@ -255,61 +347,29 @@ class TWrap[T]:
 
     @cached_property
     def union(self) -> bool:
-        return len([n for n in self._nodes if n.cls is not NoneType]) > 1
+        return len([n for n in self._nodes if n.inner_type is not NoneType]) > 1
 
     @cached_property
     def nullable(self) -> bool:
-        return any(n.cls is NoneType for n in self._nodes)
+        return any(n.inner_type is NoneType for n in self._nodes)
 
     @cached_property
     def attribute_hints(self) -> "dict[str, TWrap[Any]]":
         if self.union:
             raise TypeError("Cannot get attributes of union types")
-        attrs: dict[str, TWrap[Any]] = {}
-        for node in self._nodes:
-            if node.cls is NoneType:
-                continue
-            attrs |= self._get_recursive_attribute_hints(node.cls)
-        return attrs
-
-    def _get_recursive_attribute_hints(self, cls: type[Any]) -> "dict[str, TWrap[Any]]":
-        attr_hints: dict[str, TWrap[Any]] = {}
-        try:
-            for base in cls.__bases__:
-                attr_hints |= self._get_recursive_attribute_hints(base)
-            raw_ints: dict[str, type[Any] | TypeVar] = get_type_hints(cls, include_extras=True)
-            for attr_name, hint in raw_ints.items():
-                if isinstance(hint, TypeVar):
-                    if hint in self.type_var_lookup:
-                        attr_hints[attr_name] = peritype.wrap_type(self.type_var_lookup[hint])
-                    else:
-                        raise PeritypeError(f"TypeVar ~{hint.__name__} could not be found in lookup", cls=cls)
-                else:
-                    attr_hints[attr_name] = peritype.wrap_type(hint, lookup=self.type_var_lookup)
-        except (AttributeError, TypeError, NameError):
-            return attr_hints
-        return attr_hints
+        return self._nodes[0].attribute_hints
 
     @cached_property
     def init(self) -> "BoundFWrap[..., Any]":
         if self.union:
             raise TypeError("Cannot get __init__ of union types")
-        for node in self._nodes:
-            if hasattr(node.cls, "__init__"):
-                init_func = node.cls.__init__
-                fwrap = peritype.wrap_func(init_func)
-                bound_fwrap = fwrap.bind(self)
-                return bound_fwrap
-        raise TypeError("No __init__ method found in type nodes")
+        return self._nodes[0].init.bind(self)
 
     @cached_property
     def signature(self) -> inspect.Signature:
         if self.union:
             raise TypeError("Cannot get signature of union types")
-        for node in self._nodes:
-            if hasattr(node.cls, "__init__"):
-                return inspect.signature(node.cls)
-        raise TypeError("No __init__ method found in type nodes")
+        return inspect.signature(self._nodes[0].inner_type)
 
     @cached_property
     def parameters(self) -> dict[str, inspect.Parameter]:
@@ -319,38 +379,25 @@ class TWrap[T]:
     def inner_type(self) -> Any:
         if self.union:
             raise TypeError("Cannot get inner type of union types")
-        for node in self._nodes:
-            return node.cls
+        return self._nodes[0].inner_type
 
     @cached_property
     def generic_params(self) -> "tuple[TWrap[Any], ...]":
         if self.union:
             raise TypeError("Cannot get generic params of union types")
-        for node in self._nodes:
-            return node.nodes
-        return ()
+        return self._nodes[0].generic_params
 
     def instantiate(self, /, *args: Any, **kwargs: Any) -> T:
         if self.union:
             raise TypeError("Cannot instantiate union types")
-        for node in self._nodes:
-            if hasattr(node.cls, "__init__"):
-                return node.cls(*args, **kwargs)
-        raise TypeError("No __init__ method found in type nodes")
+        return self._nodes[0].instantiate(*args, **kwargs)
 
-    def get_method_hints(self, method_name: str) -> "BoundFWrap[..., Any]":
+    def get_method(self, method_name: str) -> "BoundFWrap[..., Any]":
         if self.union:
             raise TypeError("Cannot get methods of union types")
         if method_name in self._method_cache:
             return self._method_cache[method_name]
-        for node in self._nodes:
-            if hasattr(node.cls, method_name):
-                method_func = getattr(node.cls, method_name)
-                fwrap = peritype.wrap_func(method_func)
-                bound_fwrap = fwrap.bind(self)
-                self._method_cache[method_name] = bound_fwrap
-                return bound_fwrap
-        raise AttributeError(f"Method '{method_name}' not found in type nodes")
+        return self._nodes[0].get_method(method_name).bind(self)
 
     def match(self, other: Any) -> bool:
         other_wrap: TWrap[Any]
@@ -360,28 +407,6 @@ class TWrap[T]:
             other_wrap = peritype.wrap_type(other)
 
         for a in self._nodes:
-            for b in other_wrap._nodes:
-                if self._nodes_intersect(a, b):
-                    return True
+            if a.match(other_wrap):
+                return True
         return False
-
-    @staticmethod
-    def _nodes_intersect(a: "TypeNode[Any]", b: "TypeNode[Any]") -> bool:
-        if a.origin is Any or b.origin is Any:
-            return True
-        if a.origin is Ellipsis or b.origin is Ellipsis:
-            return True
-
-        if a.cls is not b.cls:
-            return False
-
-        if not a.nodes and not b.nodes:
-            return True
-
-        if len(a.nodes) != len(b.nodes):
-            return False
-
-        for i in range(len(a.nodes)):
-            if not a.nodes[i].match(b.nodes[i]):
-                return False
-        return True

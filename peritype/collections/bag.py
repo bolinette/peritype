@@ -13,7 +13,7 @@ class TypeBag:
         self._bag.add(twrap)
 
         def _for_nodes(node: TypeNode[Any]) -> None:
-            raw_type = node.cls
+            raw_type = node.inner_type
             if raw_type not in self._raw_types:
                 self._raw_types[raw_type] = set()
             self._raw_types[raw_type].add(twrap)
@@ -30,7 +30,7 @@ class TypeBag:
         result = set[TWrap[Any]]()
 
         def _for_nodes(node: TypeNode[Any]) -> None:
-            raw_type = node.cls
+            raw_type = node.inner_type
             if raw_type in self._raw_types:
                 for wrap in self._raw_types[raw_type]:
                     if twrap.match(wrap):

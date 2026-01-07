@@ -248,7 +248,7 @@ def test_type_method_signature() -> None:
             return True
 
     twrap = wrap_type(GenericType[int, str])
-    fwrap = twrap.get_method_hints("method")
+    fwrap = twrap.get_method("method")
 
     assert fwrap is not None
     signature_hints = fwrap.get_signature_hints()
@@ -340,3 +340,16 @@ def test_wrap_type_alias() -> None:
     assert twrap.generic_params[0].match(str)
     assert twrap.generic_params[1].match(list)
     assert twrap.generic_params[1].generic_params[0].match(int | str)
+
+
+def test_wrapped_annotated_type() -> None:
+    from typing import Annotated
+
+    class GenericType[T]:
+        pass
+
+    twrap = wrap_type(Annotated[GenericType[int], "meta"])
+
+    assert twrap.match(GenericType)
+    assert twrap.generic_params[0].match(int)
+    assert twrap.annotations == ("meta",)
