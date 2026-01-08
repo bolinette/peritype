@@ -1,7 +1,7 @@
 from typing import Any, ForwardRef, Generic, get_origin
 
 from peritype.collections import TypeSetMap
-from peritype.wrap import TWrap, TypeNode
+from peritype.wrap import TWrap
 
 
 class TypeSuperTree:
@@ -36,15 +36,12 @@ class TypeSuperTree:
         if twrap in seen:
             return
         seen.add(twrap)
-
-        def _for_nodes(node: TypeNode[Any]) -> None:
+        for node in twrap.nodes:
             for base in node.bases:
                 origin = get_origin(base.origin)
                 if (origin or base.origin) in (object, Generic, ForwardRef):
                     continue
                 TypeSuperTree._recurse_all_bases(base, seen)
-
-        twrap.__visit__(for_nodes=_for_nodes)
 
     def copy(self) -> "TypeSuperTree":
         new_tree = TypeSuperTree()

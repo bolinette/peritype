@@ -1,3 +1,4 @@
+import weakref
 from collections.abc import Callable
 from typing import Any, cast, overload
 
@@ -7,8 +8,8 @@ from peritype.twrap import TWrapMeta, TypeNode
 from peritype.utils import fill_params_in, get_generics, unpack_annotations, unpack_union
 
 USE_CACHE = True
-_TWRAP_CACHE: dict[Any, TWrap[Any]] = {}
-_FWRAP_CACHE: dict[Any, FWrap[..., Any]] = {}
+_TWRAP_CACHE: weakref.WeakValueDictionary[Any, TWrap[Any]] = weakref.WeakValueDictionary()
+_FWRAP_CACHE: weakref.WeakValueDictionary[Any, FWrap[..., Any]] = weakref.WeakValueDictionary()
 
 
 @overload

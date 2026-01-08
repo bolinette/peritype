@@ -1,7 +1,6 @@
 from typing import Any
 
 from peritype import TWrap
-from peritype.twrap import TypeNode
 
 
 class TypeBag:
@@ -11,32 +10,39 @@ class TypeBag:
 
     def add(self, twrap: TWrap[Any]) -> None:
         self._bag.add(twrap)
-
-        def _for_nodes(node: TypeNode[Any]) -> None:
+        for node in twrap.nodes:
             raw_type = node.inner_type
             if raw_type not in self._raw_types:
                 self._raw_types[raw_type] = set()
             self._raw_types[raw_type].add(twrap)
 
-        if not twrap.contains_any:
-            twrap.__visit__(for_nodes=_for_nodes)
-
     def __contains__(self, twrap: TWrap[Any]) -> bool:
         return twrap in self._bag
+
+    def get_matching(self, twrap: TWrap[Any]) -> TWrap[Any] | None:
+        if twrap in self._bag:
+            return twrap
+        for node in twrap.nodes:
+            raw_type = node.inner_type
+            if raw_type in self._raw_types:
+                for wrap in self._raw_types[raw_type]:
+                    if twrap.match(wrap):
+                        return wrap
+        return None
+
+    def contains_matching(self, twrap: TWrap[Any]) -> bool:
+        return self.get_matching(twrap) is not None
 
     def get_all(self, twrap: TWrap[Any]) -> set[TWrap[Any]]:
         if not twrap.contains_any:
             return {twrap} if twrap in self._bag else set()
         result = set[TWrap[Any]]()
-
-        def _for_nodes(node: TypeNode[Any]) -> None:
+        for node in twrap.nodes:
             raw_type = node.inner_type
             if raw_type in self._raw_types:
                 for wrap in self._raw_types[raw_type]:
                     if twrap.match(wrap):
                         result.add(wrap)
-
-        twrap.__visit__(for_nodes=_for_nodes)
         return result
 
     def copy(self) -> "TypeBag":

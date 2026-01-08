@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from functools import cached_property
 from types import NoneType
 from typing import TYPE_CHECKING, Any, ForwardRef, Literal, TypeVar, cast, get_type_hints, override
@@ -305,11 +305,6 @@ class TWrap[T]:
     @override
     def __repr__(self) -> str:
         return self._repr
-
-    def __visit__(self, *, for_nodes: Callable[[TypeNode[Any]], None] | None = None) -> None:
-        if for_nodes:
-            for node in self._nodes:
-                for_nodes(node)
 
     def __getitem__(self, index: int) -> TypeNode[Any]:
         return self.nodes[index]
