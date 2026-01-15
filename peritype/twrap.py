@@ -33,7 +33,7 @@ class TWrapMeta:
 
 
 class TypeVarLookup:
-    def __init__(self, origins: dict[TypeVar, Any], twraps: dict[TypeVar, "TWrap[Any]"]) -> NoneType:
+    def __init__(self, origins: dict[TypeVar, Any], twraps: dict[TypeVar, "TWrap[Any]"]) -> None:
         self.origin_mapping = origins
         self.twrap_mapping = twraps
 
@@ -53,21 +53,13 @@ class TypeVarLookup:
         new_twraps = self.twrap_mapping | other.twrap_mapping
         return TypeVarLookup(new_origins, new_twraps)
 
-    def origin_items(self, /) -> Iterator[tuple[TypeVar, Any]]:
-        yield from self.origin_mapping.items()
-
-    def twrap_items(self, /) -> Iterator[tuple[TypeVar, "TWrap[Any]"]]:
-        yield from self.twrap_mapping.items()
-
-    def get_origin[DefT](self, key: TypeVar, /, default: DefT | None = None) -> Any | DefT | None:
-        if key not in self.twrap_mapping:
-            return default
-        return self.origin_mapping[key]
-
-    def get_twrap[DefT](self, key: TypeVar, /, default: DefT | None = None) -> Any | DefT | None:
-        if key not in self.twrap_mapping:
-            return default
-        return self.twrap_mapping[key]
+    def replace_with(self, type_vars: tuple[TypeVar, ...]) -> "TypeVarLookup":
+        origin_mapping: dict[TypeVar, Any] = {}
+        twrap_mapping: dict[TypeVar, TWrap[Any]] = {}
+        for old_var, new_var in zip(self.origin_mapping.keys(), type_vars, strict=True):
+            origin_mapping[new_var] = self.origin_mapping[old_var]
+            twrap_mapping[new_var] = self.twrap_mapping[old_var]
+        return TypeVarLookup(origin_mapping, twrap_mapping)
 
 
 class TypeNode[T]:

@@ -359,3 +359,61 @@ def test_generic_bases() -> None:
 
     assert wrap_type(SubType[int]).nodes[0].bases[0] == wrap_type(SuperType[int])
     assert wrap_type(SubType[str]).nodes[0].bases[0] == wrap_type(SuperType[str])
+
+
+def test_annotated_type_cached() -> None:
+    class SuperType[T]: ...
+
+    class SubType[T](SuperType[T]):
+        parent1: Annotated[SuperType[T], "parent"]
+        parent2: Annotated[SuperType[T], "parent"]
+
+    super_twrap = wrap_type(SuperType[int])
+    twrap = wrap_type(SubType[int])
+
+    assert twrap.attribute_hints["parent1"].match(super_twrap)
+
+    assert twrap.attribute_hints["parent1"] is not super_twrap
+    assert twrap.attribute_hints["parent1"] is twrap.attribute_hints["parent2"]
+
+    assert twrap.attribute_hints["parent1"].annotations == ("parent",)
+    assert twrap.attribute_hints["parent2"].annotations == ("parent",)
+    assert super_twrap.annotations == ()
+
+
+def test_generic_attribute_with_union() -> None:
+    class ClassA[T]: ...
+
+    class ClassB[T]: ...
+
+    class ClassC[T, U]:
+        attr: ClassA[T] | ClassB[U]
+
+    twrap = wrap_type(ClassC[int, str])
+
+    attr_twrap = twrap.attribute_hints["attr"]
+    assert attr_twrap.union
+    assert attr_twrap.match(ClassA[int])
+    assert attr_twrap.match(ClassB[str])
+    assert not attr_twrap.match(ClassA[str])
+    assert not attr_twrap.match(ClassB[int])
+
+
+def test_generic_attribute_with_union_type_alias() -> None:
+    class ClassA[T]: ...
+
+    class ClassB[T]: ...
+
+    type ClassAorB[S, R] = ClassA[R] | ClassB[S]  # pyright: ignore[reportGeneralTypeIssues]
+
+    class ClassC[T, U]:
+        attr: ClassAorB[T, U]
+
+    twrap = wrap_type(ClassC[int, str])
+
+    attr_twrap = twrap.attribute_hints["attr"]
+    assert attr_twrap.union
+    assert attr_twrap.match(ClassA[str])
+    assert attr_twrap.match(ClassB[int])
+    assert not attr_twrap.match(ClassA[int])
+    assert not attr_twrap.match(ClassB[str])

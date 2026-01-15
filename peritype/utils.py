@@ -74,8 +74,49 @@ def specialize_type(
     raise_on_typevar: bool = True,
 ) -> Any:
     origin = get_origin(cls)
-    if origin is None:
-        return cls
+    match origin:
+        case None:
+            return cls
+        case _ if isinstance(origin, TypeAliasType):
+            return specialize_type(
+                cls.__value__,
+                # Type aliases redefine their TypeVars, so we need to replace them in the lookup
+                lookup.replace_with(cls.__type_params__),
+                raise_on_forward=raise_on_forward,
+                raise_on_typevar=raise_on_typevar,
+            )
+        case _ if origin is Annotated:
+            base, *annotations = get_args(cls)
+            specialized_base = specialize_type(
+                base,
+                lookup,
+                raise_on_forward=raise_on_forward,
+                raise_on_typevar=raise_on_typevar,
+            )
+            return Annotated[specialized_base, *annotations]
+        case _ if origin is UnionType or origin is Union:  # pyright: ignore[reportDeprecated]
+            args = get_args(cls)
+            new_args: list[Any] = []
+            for arg in args:
+                specialized_arg = specialize_type(
+                    arg,
+                    lookup,
+                    raise_on_forward=raise_on_forward,
+                    raise_on_typevar=raise_on_typevar,
+                )
+                new_args.append(specialized_arg)
+            return Union[*new_args]  # pyright: ignore[reportDeprecated]
+        case _ if origin is NotRequired:
+            base = get_args(cls)[0]
+            specialized_base = specialize_type(
+                base,
+                lookup,
+                raise_on_forward=raise_on_forward,
+                raise_on_typevar=raise_on_typevar,
+            )
+            return NotRequired[specialized_base]
+        case _:
+            pass
     args = get_args(cls)
     if not args:
         return cls
