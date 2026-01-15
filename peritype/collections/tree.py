@@ -13,8 +13,6 @@ class TypeSuperTree:
         self._recurse_all_bases(twrap, bases)
         for base in bases:
             self._add_type(base, twrap)
-            if base is not twrap:
-                self.add(base)
 
     def __contains__(self, twrap: TWrap[Any]) -> bool:
         return twrap in self._content

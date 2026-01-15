@@ -2,10 +2,10 @@ import inspect
 from collections.abc import Iterator
 from functools import cached_property
 from types import NoneType
-from typing import TYPE_CHECKING, Any, ForwardRef, Literal, TypeVar, cast, get_type_hints, override
+from typing import TYPE_CHECKING, Any, ForwardRef, Generic, Literal, TypeVar, cast, get_origin, get_type_hints, override
 
 import peritype
-from peritype.errors import PeritypeError
+from peritype.errors import UnresolvedTypeVarError
 
 if TYPE_CHECKING:
     from peritype.fwrap import BoundFWrap, FWrap
@@ -165,10 +165,14 @@ class TypeNode[T]:
         if hasattr(self._inner_type, "__orig_bases__"):
             origin_bases: tuple[type[Any], ...] = getattr(self._inner_type, "__orig_bases__", ())
             for base in origin_bases:
+                if (base_origin := get_origin(base)) and base_origin is Generic:
+                    continue
                 bases.append(peritype.wrap_type(base, lookup=self.type_var_lookup))
         elif hasattr(self._inner_type, "__bases__"):
             cls_bases = getattr(self._inner_type, "__bases__", ())
             for base in cls_bases:
+                if (base_origin := get_origin(base)) and base_origin is Generic:
+                    continue
                 bases.append(peritype.wrap_type(base, lookup=self.type_var_lookup))
         return (*bases,)
 
@@ -184,6 +188,8 @@ class TypeNode[T]:
         if hasattr(self._inner_type, "__orig_bases__"):
             origin_bases: tuple[type[Any], ...] = getattr(self._inner_type, "__orig_bases__", ())
             for base in origin_bases:
+                if (base_origin := get_origin(base)) and base_origin is Generic:
+                    continue
                 base_wrap = peritype.wrap_type(base, lookup=lookup)
                 base_lookup |= base_wrap.type_var_lookup
         return base_lookup | lookup
@@ -205,7 +211,7 @@ class TypeNode[T]:
                     if hint in self.type_var_lookup:
                         attr_hints[attr_name] = peritype.wrap_type(self.type_var_lookup[hint])
                     else:
-                        raise PeritypeError(f"TypeVar ~{hint.__name__} could not be found in lookup", cls=cls)
+                        raise UnresolvedTypeVarError(hint.__name__, cls=cls)
                 else:
                     attr_hints[attr_name] = peritype.wrap_type(hint, lookup=self.type_var_lookup)
         except (AttributeError, TypeError, NameError):

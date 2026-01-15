@@ -7,3 +7,15 @@ class PeritypeError(Exception):
             message = f"{cls.__qualname__}: {message}"
         super().__init__(message)
         self.cls = cls
+
+
+class UnresolvedForwardRefError(PeritypeError):
+    def __init__(self, name: str, cls: type[Any] | None = None) -> None:
+        super().__init__(f"Parameter {name} could not be resolved from context", cls=cls)
+        self.name = name
+
+
+class UnresolvedTypeVarError(PeritypeError):
+    def __init__(self, typevar_name: str, cls: type[Any] | None = None) -> None:
+        super().__init__(f"TypeVar {typevar_name} could not be inferred from context", cls=cls)
+        self.typevar_name = typevar_name

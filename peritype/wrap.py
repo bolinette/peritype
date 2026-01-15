@@ -5,7 +5,13 @@ from typing import Any, cast, overload
 from peritype import FWrap, TWrap
 from peritype.mapping import TypeVarMapping
 from peritype.twrap import TWrapMeta, TypeNode
-from peritype.utils import fill_params_in, get_generics, unpack_annotations, unpack_union
+from peritype.utils import (
+    fill_params_in,
+    get_generics,
+    specialize_type,
+    unpack_annotations,
+    unpack_union,
+)
 
 USE_CACHE = True
 _TWRAP_CACHE: weakref.WeakValueDictionary[Any, TWrap[Any]] = weakref.WeakValueDictionary()
@@ -29,6 +35,8 @@ def wrap_type(
     *,
     lookup: TypeVarMapping | None = None,
 ) -> Any:
+    if lookup is not None:
+        cls = specialize_type(cls, lookup, raise_on_forward=True, raise_on_typevar=True)
     if USE_CACHE and cls in _TWRAP_CACHE:
         return _TWRAP_CACHE[cls]
     meta = TWrapMeta(annotated=tuple[Any](), required=True, total=True)
@@ -38,7 +46,7 @@ def wrap_type(
     for node in nodes:
         if node in (None, type(None)):
             node = type(None)
-        root, vars = get_generics(node, lookup, True, True)
+        root, vars = get_generics(node, raise_on_forward=True, raise_on_typevar=True)
         root, vars = fill_params_in(root, vars)
         wrapped_vars = (*(wrap_type(var) for var in vars),)
         wrapped_node = TypeNode(node, wrapped_vars, root, vars)

@@ -14,7 +14,7 @@ from typing import (
     get_origin,
 )
 
-from peritype.errors import PeritypeError
+from peritype.errors import UnresolvedForwardRefError, UnresolvedTypeVarError
 from peritype.mapping import TypeVarMapping
 from peritype.twrap import TWrapMeta
 
@@ -44,7 +44,7 @@ def unpack_union(cls: Any) -> tuple[Any, ...]:
 
 def get_generics[GenT](
     _cls: type[GenT],
-    lookup: TypeVarMapping | None,
+    *,
     raise_on_forward: bool,
     raise_on_typevar: bool,
 ) -> tuple[type[GenT], tuple[Any, ...]]:
@@ -52,30 +52,50 @@ def get_generics[GenT](
         type_vars: list[Any] = []
         for arg in get_args(_cls):
             arg: Any
-            if isinstance(arg, ForwardRef) and raise_on_forward:
-                raise PeritypeError(
-                    f"Generic parameter '{arg.__forward_arg__}' cannot be a string",
-                    cls=origin,
-                )
-            if isinstance(arg, TypeVar):
-                if lookup is not None:
-                    if arg in lookup:
-                        arg = lookup[arg]
-                    elif raise_on_typevar:
-                        raise PeritypeError(
-                            f"TypeVar ~{arg.__name__} could not be found in lookup",
-                            cls=origin,
-                        )
-                elif raise_on_typevar:
-                    raise PeritypeError(
-                        f"Generic parameter ~{arg.__name__} cannot be a TypeVar",
-                        cls=origin,
-                    )
-            if isinstance(arg, list):
-                arg = (*arg,)
+            match arg:
+                case TypeVar() if raise_on_typevar:
+                    raise UnresolvedTypeVarError(arg.__name__, cls=origin)
+                case ForwardRef() if raise_on_forward:
+                    raise UnresolvedForwardRefError(arg.__forward_arg__, cls=origin)
+                case list():
+                    arg = (*arg,)
+                case _:
+                    pass
             type_vars.append(arg)
         return origin, (*type_vars,)
     return _cls, ()
+
+
+def specialize_type(
+    cls: Any,
+    lookup: TypeVarMapping,
+    *,
+    raise_on_forward: bool = True,
+    raise_on_typevar: bool = True,
+) -> Any:
+    origin = get_origin(cls)
+    if origin is None:
+        return cls
+    args = get_args(cls)
+    if not args:
+        return cls
+    new_args: list[Any] = []
+    specialized = False
+    for arg in args:
+        match arg:
+            case TypeVar() if arg in lookup:
+                new_args.append(lookup[arg])
+                specialized = True
+            case TypeVar() if raise_on_typevar:
+                raise UnresolvedTypeVarError(arg.__name__, cls=origin)
+            case ForwardRef() if raise_on_forward:
+                raise UnresolvedForwardRefError(arg.__forward_arg__, cls=origin)
+            case _:
+                new_args.append(arg)
+    vars = tuple(new_args)
+    if not specialized:
+        return cls
+    return origin[vars]
 
 
 def use_cache(value: bool) -> None:

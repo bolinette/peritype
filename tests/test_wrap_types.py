@@ -1,5 +1,5 @@
 from collections.abc import Coroutine
-from typing import Annotated, Any, Concatenate, Generic, NotRequired, get_origin
+from typing import Annotated, Any, Concatenate, NotRequired
 
 import pytest
 
@@ -153,9 +153,8 @@ def test_generic_type_bases() -> None:
 
     tw = wrap_type(Type[int])
     bases = tw[0].bases
-    assert len(bases) == 2
+    assert len(bases) == 1
     assert bases[0].match(Super)
-    assert get_origin(bases[1].origin) is Generic
 
 
 def test_super_generic_type_bases() -> None:
@@ -167,9 +166,8 @@ def test_super_generic_type_bases() -> None:
 
     tw = wrap_type(Child[int])
     bases = tw[0].bases
-    assert len(bases) == 2
+    assert len(bases) == 1
     assert bases[0].match(Super[str])
-    assert get_origin(bases[1].origin) is Generic
 
 
 def test_super_transversal_generic_type_bases() -> None:
@@ -181,9 +179,8 @@ def test_super_transversal_generic_type_bases() -> None:
 
     tw = wrap_type(Child[int])
     bases = tw[0].bases
-    assert len(bases) == 2
+    assert len(bases) == 1
     assert bases[0].match(Super[int])
-    assert get_origin(bases[1].origin) is Generic
 
 
 def test_type_attributes() -> None:
@@ -353,3 +350,12 @@ def test_wrapped_annotated_type() -> None:
     assert twrap.match(GenericType)
     assert twrap.generic_params[0].match(int)
     assert twrap.annotations == ("meta",)
+
+
+def test_generic_bases() -> None:
+    class SuperType[T]: ...
+
+    class SubType[T](SuperType[T]): ...
+
+    assert wrap_type(SubType[int]).nodes[0].bases[0] == wrap_type(SuperType[int])
+    assert wrap_type(SubType[str]).nodes[0].bases[0] == wrap_type(SuperType[str])
