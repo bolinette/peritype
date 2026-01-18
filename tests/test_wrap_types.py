@@ -417,3 +417,53 @@ def test_generic_attribute_with_union_type_alias() -> None:
     assert attr_twrap.match(ClassB[int])
     assert not attr_twrap.match(ClassA[int])
     assert not attr_twrap.match(ClassB[str])
+
+
+def test_match_super_type_with_generic_params() -> None:
+    class SuperType[T]: ...
+
+    class SubType(SuperType[int]): ...
+
+    assert not wrap_type(SubType).match(SuperType[int])
+    assert not wrap_type(SubType).match(SuperType[int], match_mode="exact")
+
+    assert wrap_type(SubType).match(SuperType[int], match_mode="super")
+    assert not wrap_type(SuperType[int]).match(SubType, match_mode="super")
+    assert not wrap_type(SubType).match(SuperType[str], match_mode="super")
+
+    assert wrap_type(SuperType[int]).match(SubType, match_mode="sub")
+    assert not wrap_type(SubType).match(SuperType[int], match_mode="sub")
+    assert not wrap_type(SuperType[str]).match(SubType, match_mode="sub")
+
+    assert wrap_type(SubType).match(SuperType[int], match_mode="any")
+    assert wrap_type(SuperType[int]).match(SubType, match_mode="any")
+    assert not wrap_type(SubType).match(SuperType[str], match_mode="any")
+    assert not wrap_type(SuperType[str]).match(SubType, match_mode="any")
+
+    assert wrap_type(SubType).match(SuperType[int | str], match_mode="super")
+    assert wrap_type(SubType).match(SuperType[Any], match_mode="super")
+
+
+def test_match_super_generic_type_with_generic_params() -> None:
+    class SuperType[T]: ...
+
+    class SubType[T](SuperType[T]): ...
+
+    assert not wrap_type(SubType[int]).match(SuperType[int])
+    assert not wrap_type(SubType[int]).match(SuperType[int], match_mode="exact")
+
+    assert wrap_type(SubType[int]).match(SuperType[int], match_mode="super")
+    assert not wrap_type(SuperType[int]).match(SubType[int], match_mode="super")
+    assert not wrap_type(SubType[str]).match(SuperType[int], match_mode="super")
+
+    assert wrap_type(SuperType[int]).match(SubType[int], match_mode="sub")
+    assert not wrap_type(SubType[int]).match(SuperType[int], match_mode="sub")
+    assert not wrap_type(SuperType[int]).match(SubType[str], match_mode="sub")
+
+    assert wrap_type(SubType[int]).match(SuperType[int], match_mode="any")
+    assert wrap_type(SuperType[int]).match(SubType[int], match_mode="any")
+    assert not wrap_type(SubType[str]).match(SuperType[int], match_mode="any")
+    assert not wrap_type(SuperType[str]).match(SubType[int], match_mode="any")
+
+    assert wrap_type(SubType[int]).match(SuperType[int | str], match_mode="super")
+    assert wrap_type(SubType[int]).match(SuperType[Any], match_mode="super")

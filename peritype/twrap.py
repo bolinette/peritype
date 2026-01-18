@@ -10,6 +10,8 @@ from peritype.errors import UnresolvedTypeVarError
 if TYPE_CHECKING:
     from peritype.fwrap import BoundFWrap, FWrap
 
+type MatchMode = Literal["exact", "super", "sub", "any"]
+
 
 class TWrapMeta:
     def __init__(
@@ -74,6 +76,8 @@ class TypeNode[T]:
         self._generic_params = generic_params
         self._inner_type = inner_type
         self._origin_params = origin_params
+        self._bases: tuple[TWrap[Any], ...] | None = None
+        self._type_var_lookup: TypeVarLookup | None = None
 
     @property
     def origin(self) -> Any:
@@ -151,25 +155,8 @@ class TypeNode[T]:
                 return True
         return False
 
-    @cached_property
-    def bases(self) -> tuple["TWrap[Any]", ...]:
+    def _get_bases_and_type_var_lookup(self) -> "tuple[tuple['TWrap[Any]', ...], TypeVarLookup]":
         bases: list[TWrap[Any]] = []
-        if hasattr(self._inner_type, "__orig_bases__"):
-            origin_bases: tuple[type[Any], ...] = getattr(self._inner_type, "__orig_bases__", ())
-            for base in origin_bases:
-                if (base_origin := get_origin(base)) and base_origin is Generic:
-                    continue
-                bases.append(peritype.wrap_type(base, lookup=self.type_var_lookup))
-        elif hasattr(self._inner_type, "__bases__"):
-            cls_bases = getattr(self._inner_type, "__bases__", ())
-            for base in cls_bases:
-                if (base_origin := get_origin(base)) and base_origin is Generic:
-                    continue
-                bases.append(peritype.wrap_type(base, lookup=self.type_var_lookup))
-        return (*bases,)
-
-    @cached_property
-    def type_var_lookup(self) -> TypeVarLookup:
         parameters = getattr(self._inner_type, "__type_params__", None) or getattr(
             self._inner_type, "__parameters__", None
         )
@@ -177,14 +164,28 @@ class TypeNode[T]:
         twrap_lookup = dict(zip(parameters, self._generic_params, strict=True)) if parameters else {}
         lookup = TypeVarLookup(origin_lookup, twrap_lookup)
         base_lookup = TypeVarLookup({}, {})
-        if hasattr(self._inner_type, "__orig_bases__"):
-            origin_bases: tuple[type[Any], ...] = getattr(self._inner_type, "__orig_bases__", ())
-            for base in origin_bases:
-                if (base_origin := get_origin(base)) and base_origin is Generic:
-                    continue
-                base_wrap = peritype.wrap_type(base, lookup=lookup)
-                base_lookup |= base_wrap.type_var_lookup
-        return base_lookup | lookup
+        origin_bases: tuple[type[Any], ...] = getattr(
+            self._inner_type, "__orig_bases__", getattr(self._inner_type, "__bases__", ())
+        )
+        for base in origin_bases:
+            if (base_origin := get_origin(base)) and base_origin is Generic:
+                continue
+            base_wrap = peritype.wrap_type(base, lookup=lookup)
+            bases.append(base_wrap)
+            base_lookup |= base_wrap.type_var_lookup
+        return (*bases,), base_lookup | lookup
+
+    @property
+    def bases(self) -> tuple["TWrap[Any]", ...]:
+        if self._bases is None:
+            self._bases, self._type_var_lookup = self._get_bases_and_type_var_lookup()
+        return self._bases
+
+    @property
+    def type_var_lookup(self) -> TypeVarLookup:
+        if self._type_var_lookup is None:
+            self._bases, self._type_var_lookup = self._get_bases_and_type_var_lookup()
+        return self._type_var_lookup
 
     @cached_property
     def attribute_hints(self) -> "dict[str, TWrap[Any]]":
@@ -234,20 +235,40 @@ class TypeNode[T]:
         method_func = getattr(self._inner_type, method_name)
         return peritype.wrap_func(method_func)
 
-    def match(self, other: "TWrap[Any]") -> bool:
+    def match(self, other: "TWrap[Any]", *, match_mode: MatchMode = "exact") -> bool:
         for other_node in other.nodes:
-            if self._nodes_intersect(other_node):
+            if self._nodes_intersect(other_node, match_mode=match_mode):
                 return True
         return False
 
-    def _nodes_intersect(self, b: "TypeNode[Any]") -> bool:
+    def _match_super(self, b: "TypeNode[Any]") -> bool:
+        for base in self.bases:
+            if b.match(base):
+                return True
+        return False
+
+    def _match_sub(self, b: "TypeNode[Any]") -> bool:
+        for base in b.bases:
+            if self.match(base):
+                return True
+        return False
+
+    def _nodes_intersect(self, b: "TypeNode[Any]", *, match_mode: MatchMode = "exact") -> bool:
         if self._origin is Any or b._origin is Any:
             return True
         if self._origin is Ellipsis or b._origin is Ellipsis:
             return True
 
         if self._inner_type is not b._inner_type:
-            return False
+            match match_mode:
+                case "exact":
+                    return False
+                case "super":
+                    return self._match_super(b)
+                case "sub":
+                    return self._match_sub(b)
+                case "any":
+                    return self._match_super(b) or self._match_sub(b)
 
         if not self._generic_params and not b._generic_params:
             return True
@@ -392,7 +413,7 @@ class TWrap[T]:
             return self._method_cache[method_name]
         return self._nodes[0].get_method(method_name).bind(self)
 
-    def match(self, other: Any) -> bool:
+    def match(self, other: Any, *, match_mode: MatchMode = "exact") -> bool:
         other_wrap: TWrap[Any]
         if isinstance(other, TWrap):
             other_wrap = cast(TWrap[Any], other)
@@ -400,6 +421,6 @@ class TWrap[T]:
             other_wrap = peritype.wrap_type(other)
 
         for a in self._nodes:
-            if a.match(other_wrap):
+            if a.match(other_wrap, match_mode=match_mode):
                 return True
         return False

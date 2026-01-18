@@ -19,7 +19,7 @@ class TypeBag:
     def __contains__(self, twrap: TWrap[Any]) -> bool:
         return twrap in self._bag
 
-    def get_matching(self, twrap: TWrap[Any]) -> TWrap[Any] | None:
+    def first_matching(self, twrap: TWrap[Any]) -> TWrap[Any] | None:
         if twrap in self._bag:
             return twrap
         for node in twrap.nodes:
@@ -31,9 +31,9 @@ class TypeBag:
         return None
 
     def contains_matching(self, twrap: TWrap[Any]) -> bool:
-        return self.get_matching(twrap) is not None
+        return self.first_matching(twrap) is not None
 
-    def get_all(self, twrap: TWrap[Any]) -> set[TWrap[Any]]:
+    def get_all_matching(self, twrap: TWrap[Any]) -> set[TWrap[Any]]:
         if not twrap.contains_any:
             return {twrap} if twrap in self._bag else set()
         result = set[TWrap[Any]]()
@@ -43,6 +43,13 @@ class TypeBag:
                 for wrap in self._raw_types[raw_type]:
                     if twrap.match(wrap):
                         result.add(wrap)
+        return result
+
+    def get_all_submatching(self, twrap: TWrap[Any]) -> set[TWrap[Any]]:
+        result = set[TWrap[Any]]()
+        for twrap_in_bag in self._bag:
+            if twrap.match(twrap_in_bag, match_mode="sub"):
+                result.add(twrap_in_bag)
         return result
 
     def copy(self) -> "TypeBag":
