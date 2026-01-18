@@ -26,6 +26,15 @@ class TypeMap[K, V]:
     def __iter__(self) -> Iterator[tuple[TWrap[K], V]]:
         yield from self._content.items()
 
+    def items(self) -> dict[TWrap[K], V]:
+        return {**self._content}
+
+    def keys(self) -> Iterator[TWrap[K]]:
+        yield from self._content.keys()
+
+    def values(self) -> Iterator[V]:
+        yield from self._content.values()
+
     @overload
     def get[D](self, twrap: TWrap[K], /, *, default: D) -> V | D: ...
     @overload

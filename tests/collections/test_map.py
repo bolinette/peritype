@@ -1,6 +1,6 @@
 from typing import Any
 
-from peritype import wrap_type
+from peritype import TWrap, wrap_type
 from peritype.collections import TypeMap, TypeSetMap
 
 
@@ -63,3 +63,55 @@ def test_type_set_map() -> None:
 
     value = map.get(wrap_type(int))
     assert value is None
+
+
+def test_iter_items() -> None:
+    map = TypeMap[Any, int]()
+
+    class TestTypeA:
+        pass
+
+    class TestTypeB:
+        pass
+
+    map.add(wrap_type(TestTypeA), 1)
+    map.add(wrap_type(TestTypeB), 2)
+
+    items: set[tuple[TWrap[Any], int]] = set()
+    for key, value in map:
+        items.add((key, value))
+    assert items == {(wrap_type(TestTypeA), 1), (wrap_type(TestTypeB), 2)}
+
+    assert map.items() == {wrap_type(TestTypeA): 1, wrap_type(TestTypeB): 2}
+
+    assert {*map.keys()} == {wrap_type(TestTypeA), wrap_type(TestTypeB)}
+    assert {*map.values()} == {1, 2}
+
+
+def test_copy() -> None:
+    map = TypeMap[Any, int]()
+
+    class TestTypeA:
+        pass
+
+    class TestTypeB:
+        pass
+
+    class TestTypeC:
+        pass
+
+    map.add(wrap_type(TestTypeA), 1)
+    map.add(wrap_type(TestTypeB), 2)
+
+    map_copy = map.copy()
+
+    assert len(map_copy) == 2
+    assert map_copy[wrap_type(TestTypeA)] == 1
+    assert map_copy[wrap_type(TestTypeB)] == 2
+
+    map_copy.add(wrap_type(TestTypeC), 3)
+
+    assert len(map) == 2
+    assert len(map_copy) == 3
+    assert wrap_type(TestTypeC) not in map
+    assert wrap_type(TestTypeC) in map_copy

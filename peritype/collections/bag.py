@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any
 
 from peritype import TWrap
@@ -16,8 +17,26 @@ class TypeBag:
                 self._raw_types[raw_type] = set()
             self._raw_types[raw_type].add(twrap)
 
+    def remove(self, twrap: TWrap[Any]) -> None:
+        self._bag.remove(twrap)
+        for node in twrap.nodes:
+            raw_type = node.inner_type
+            if raw_type in self._raw_types:
+                self._raw_types[raw_type].remove(twrap)
+                if not self._raw_types[raw_type]:
+                    del self._raw_types[raw_type]
+
     def __contains__(self, twrap: TWrap[Any]) -> bool:
         return twrap in self._bag
+
+    def __iter__(self) -> Iterator[TWrap[Any]]:
+        yield from self._bag
+
+    def __len__(self) -> int:
+        return len(self._bag)
+
+    def items(self) -> set[TWrap[Any]]:
+        return {*self._bag}
 
     def first_matching(self, twrap: TWrap[Any]) -> TWrap[Any] | None:
         if twrap in self._bag:

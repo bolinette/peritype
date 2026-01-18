@@ -107,3 +107,88 @@ def test_match_union() -> None:
     assert twrap_int not in bag
     assert bag.contains_matching(twrap_int)
     assert bag.first_matching(twrap_int) == twrap_union
+
+
+def test_match_none() -> None:
+    bag = TypeBag()
+
+    class TestType[T]: ...
+
+    twrap_int = wrap_type(TestType[int])
+    twrap_str = wrap_type(TestType[str])
+
+    bag.add(twrap_int)
+
+    assert twrap_int in bag
+    assert not bag.contains_matching(twrap_str)
+    assert bag.first_matching(twrap_str) is None
+
+
+def test_remove() -> None:
+    bag = TypeBag()
+
+    class TestType[T]: ...
+
+    twrap_int = wrap_type(TestType[int])
+    twrap_str = wrap_type(TestType[str])
+
+    bag.add(twrap_int)
+    bag.add(twrap_str)
+
+    assert len(bag) == 2
+
+    bag.remove(twrap_int)
+
+    assert len(bag) == 1
+    assert twrap_int not in bag
+    assert twrap_str in bag
+
+    bag.remove(twrap_str)
+    assert len(bag) == 0
+
+
+def test_iter() -> None:
+    bag = TypeBag()
+
+    class TestType[T]: ...
+
+    twrap_int = wrap_type(TestType[int])
+    twrap_str = wrap_type(TestType[str])
+
+    bag.add(twrap_int)
+    bag.add(twrap_str)
+
+    items: set[Any] = set()
+    for item in bag:
+        items.add(item)
+    assert items == {twrap_int, twrap_str}
+
+    assert bag.items() == {twrap_int, twrap_str}
+
+
+def test_copy() -> None:
+    bag = TypeBag()
+
+    class TestType[T]: ...
+
+    twrap_int = wrap_type(TestType[int])
+    twrap_str = wrap_type(TestType[str])
+    twrap_float = wrap_type(TestType[float])
+
+    bag.add(twrap_int)
+    bag.add(twrap_str)
+
+    assert len(bag) == 2
+
+    bag_copy = bag.copy()
+
+    assert len(bag_copy) == 2
+    assert twrap_int in bag_copy
+    assert twrap_str in bag_copy
+
+    bag_copy.add(twrap_float)
+
+    assert len(bag) == 2
+    assert len(bag_copy) == 3
+    assert twrap_float not in bag
+    assert twrap_float in bag_copy

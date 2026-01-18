@@ -11,8 +11,6 @@ if TYPE_CHECKING:
 
 class FWrap[**FuncP, FuncT]:
     def __init__(self, func: Callable[FuncP, FuncT]) -> None:
-        if isinstance(func, FWrap):
-            raise TypeError(f"Cannot wrap {func}, already wrapped")
         self.func = func
         self.bound_to = getattr(self.func, "__self__", None)
         self._signature_hints: dict[str, Any] | None = None
