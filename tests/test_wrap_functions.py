@@ -1,4 +1,9 @@
+from typing import Any
+
+import pytest
+
 from peritype import FWrap, wrap_func, wrap_type
+from peritype.errors import UnresolvedFunctionTypeVarsError, UnresolvedTypeVarError
 
 
 def test_wrap_basic_func() -> None:
@@ -6,6 +11,9 @@ def test_wrap_basic_func() -> None:
 
     fwrap = wrap_func(func)
     assert isinstance(fwrap, FWrap)
+    assert not fwrap.is_generic
+    assert fwrap.is_defined
+
     parameters = fwrap.parameters
     assert "x" in parameters
     assert "y" in parameters
@@ -13,6 +21,7 @@ def test_wrap_basic_func() -> None:
     assert fwrap.param_at(1).annotation is str
     assert fwrap.get_signature_hint(0).match(int)
     assert fwrap.get_signature_hint(1).match(str)
+
     signature_hints = fwrap.get_signature_hints()
     assert signature_hints["x"].match(int)
     assert signature_hints["y"].match(str)
@@ -112,3 +121,85 @@ def test_wrap_init_with_union() -> None:
     signature_hints = fwrap2.get_signature_hints(belongs_to=twrap)
     assert signature_hints["value"].match(P2)
     assert signature_hints["return"].match(None)
+
+
+def test_wrap_specialize_generic_function() -> None:
+    def generic_func[T](x: T) -> T: ...
+
+    fwrap = wrap_func(generic_func)
+
+    with pytest.raises(UnresolvedTypeVarError):
+        fwrap.get_signature_hints()
+    assert fwrap.is_generic
+    assert not fwrap.is_defined
+
+    spe_fwrap = fwrap.specialize((wrap_type(int),))
+    assert spe_fwrap.is_generic
+    assert spe_fwrap.is_defined
+    signature_hints = spe_fwrap.get_signature_hints()
+    assert signature_hints["x"].match(int)
+    assert signature_hints["return"].match(int)
+
+    unspe_fwrap = spe_fwrap.unspecialize()
+    assert unspe_fwrap.is_generic
+    assert unspe_fwrap.is_defined
+    signature_hints = unspe_fwrap.get_signature_hints()
+    assert signature_hints["x"] is wrap_type(Any)
+
+    respe_fwrap = unspe_fwrap.specialize((wrap_type(str),))
+    assert respe_fwrap.is_generic
+    assert respe_fwrap.is_defined
+    signature_hints = respe_fwrap.get_signature_hints()
+    assert signature_hints["x"].match(str)
+    assert signature_hints["return"].match(str)
+
+
+def test_wrap_specialize_generic_function_from_return() -> None:
+    class GenericClass[T, V]: ...
+
+    def generic_func[T, V](x: T, y: V) -> GenericClass[V, T]: ...
+
+    fwrap = wrap_func(generic_func)
+
+    with pytest.raises(UnresolvedTypeVarError):
+        fwrap.get_signature_hints()
+    assert not fwrap.is_defined
+    assert fwrap.is_generic
+
+    spe_fwrap = fwrap.specialize_from_return(wrap_type(GenericClass[int, str]))
+    assert spe_fwrap.is_generic
+    assert spe_fwrap.is_defined
+    signature_hints = spe_fwrap.get_signature_hints()
+    assert signature_hints["x"].match(str)
+    assert signature_hints["y"].match(int)
+    assert signature_hints["return"].match(GenericClass[int, str])
+
+
+def test_fail_wrap_specialize_from_return_missing_param() -> None:
+    class GenericClass[T]: ...
+
+    def generic_func[T, V](x: T, y: V, z: V) -> GenericClass[T]: ...
+
+    fwrap = wrap_func(generic_func)
+
+    with pytest.raises(UnresolvedTypeVarError):
+        fwrap.get_signature_hints()
+    assert not fwrap.is_defined
+    assert fwrap.is_generic
+
+    with pytest.raises(UnresolvedFunctionTypeVarsError) as exc_info:
+        fwrap.specialize_from_return(wrap_type(GenericClass[int]))
+
+    assert exc_info.value.func_name == "test_fail_wrap_specialize_from_return_missing_param.<locals>.generic_func"
+    assert exc_info.value.typevars == ["T", "V"]
+    assert (
+        str(exc_info.value)
+        == "TypeVars T, V in function test_fail_wrap_specialize_from_return_missing_param.<locals>.generic_func "
+        "could not be inferred from context"
+    )
+
+
+def test_wrap_specialize_non_generic_function() -> None:
+    def func(x: int) -> int: ...
+
+    assert wrap_func(func).specialize((wrap_type(str),)) is wrap_func(func)

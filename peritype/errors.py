@@ -19,3 +19,10 @@ class UnresolvedTypeVarError(PeritypeError):
     def __init__(self, typevar_name: str, cls: type[Any] | None = None) -> None:
         super().__init__(f"TypeVar {typevar_name} could not be inferred from context", cls=cls)
         self.typevar_name = typevar_name
+
+
+class UnresolvedFunctionTypeVarsError(PeritypeError):
+    def __init__(self, func_name: str, typevars: list[str]) -> None:
+        super().__init__(f"TypeVars {', '.join(typevars)} in function {func_name} could not be inferred from context")
+        self.func_name = func_name
+        self.typevars = typevars

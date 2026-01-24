@@ -38,7 +38,7 @@ class TypeBag:
     def items(self) -> set[TWrap[Any]]:
         return {*self._bag}
 
-    def first_matching(self, twrap: TWrap[Any]) -> TWrap[Any] | None:
+    def first_matching_or_none(self, twrap: TWrap[Any]) -> TWrap[Any] | None:
         if twrap in self._bag:
             return twrap
         for node in twrap.nodes:
@@ -49,8 +49,14 @@ class TypeBag:
                         return wrap
         return None
 
+    def first_matching(self, twrap: TWrap[Any]) -> TWrap[Any]:
+        result = self.first_matching_or_none(twrap)
+        if result is None:
+            raise KeyError(f"No matching type found for {twrap}")
+        return result
+
     def contains_matching(self, twrap: TWrap[Any]) -> bool:
-        return self.first_matching(twrap) is not None
+        return self.first_matching_or_none(twrap) is not None
 
     def get_all_matching(self, twrap: TWrap[Any]) -> set[TWrap[Any]]:
         if not twrap.contains_any:

@@ -139,6 +139,27 @@ def specialize_type(
     return origin[vars]
 
 
+def find_type_var_equivalents(
+    t1: Any,
+    t2: Any,
+    lookup: dict[TypeVar, Any] | None = None,
+) -> dict[TypeVar, Any]:
+    if lookup is None:
+        lookup = {}
+    if isinstance(t1, TypeVar):
+        lookup[t1] = t2
+        return lookup
+    origin1 = get_origin(t1)
+    origin2 = get_origin(t2)
+    if origin1 != origin2:
+        raise ValueError(f"Cannot match types {t1} and {t2}")
+    args1 = get_args(t1)
+    args2 = get_args(t2)
+    for arg1, arg2 in zip(args1, args2, strict=True):
+        find_type_var_equivalents(arg1, arg2, lookup=lookup)
+    return lookup
+
+
 def use_cache(value: bool) -> None:
     from peritype import wrap
 

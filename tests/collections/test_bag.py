@@ -1,5 +1,7 @@
 from typing import Any
 
+import pytest
+
 from peritype.collections import TypeBag
 from peritype.wrap import wrap_type
 
@@ -121,7 +123,10 @@ def test_match_none() -> None:
 
     assert twrap_int in bag
     assert not bag.contains_matching(twrap_str)
-    assert bag.first_matching(twrap_str) is None
+    assert bag.first_matching_or_none(twrap_str) is None
+
+    with pytest.raises(KeyError):
+        bag.first_matching(twrap_str)
 
 
 def test_remove() -> None:
