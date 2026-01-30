@@ -2,13 +2,29 @@ import inspect
 from collections.abc import Iterator
 from functools import cached_property
 from types import NoneType
-from typing import TYPE_CHECKING, Any, ForwardRef, Generic, Literal, TypeVar, cast, get_origin, get_type_hints, override
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ForwardRef,
+    Generic,
+    Literal,
+    TypeGuard,
+    TypeVar,
+    Union,  # pyright: ignore[reportDeprecated]
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+    override,
+)
 
 import peritype
-from peritype.errors import UnresolvedTypeVarError
+from peritype.errors import IncompatibleTypesError, UnresolvedTypeVarError
+from peritype.utils import WithOriginClass
+from peritype.utils._cache import CACHE
 
 if TYPE_CHECKING:
-    from peritype.fwrap import BoundFWrap, FWrap
+    from peritype._fwrap import BoundFWrap, FWrap
 
 type MatchMode = Literal["exact", "super", "sub", "any"]
 
@@ -36,32 +52,95 @@ class TWrapMeta:
 
 class TypeVarLookup:
     def __init__(self, origins: dict[TypeVar, Any], twraps: dict[TypeVar, "TWrap[Any]"]) -> None:
-        self.origin_mapping = origins
-        self.twrap_mapping = twraps
+        origin_keys = set(origins.keys())
+        twrap_keys = set(twraps.keys())
+        if origin_keys != twrap_keys:
+            raise ValueError("Origins and TWraps must have the same TypeVar keys")
+        self._type_vars = origin_keys
+        self._origin_mapping = origins
+        self._twrap_mapping = twraps
+        self._eq_outward: dict[TypeVar, set[TypeVar]] = {}
+        self._eq_inward: dict[TypeVar, TypeVar] = {}
 
     def __getitem__(self, key: TypeVar, /) -> Any:
-        if key not in self.twrap_mapping:
-            raise KeyError(key)
-        return self.origin_mapping[key]
+        if key in self._origin_mapping:
+            return self._origin_mapping[key]
+        raise KeyError(key)
+
+    def get_twrap(self, key: TypeVar, /, equivalent: "TypeVarLookup | None" = None) -> "TWrap[Any]":
+        if key in self._twrap_mapping:
+            return self._twrap_mapping[key]
+        if equivalent is not None and equivalent._has_equivalent(key):
+            return equivalent._get_by_equivalent(self._twrap_mapping, key)
+        raise KeyError(key)
 
     def __contains__(self, key: TypeVar, /) -> bool:
-        return key in self.origin_mapping
+        return key in self._type_vars
 
     def __iter__(self, /) -> Iterator[TypeVar]:
-        yield from self.origin_mapping
+        yield from self._origin_mapping
 
-    def __or__(self, other: "TypeVarLookup") -> "TypeVarLookup":
-        new_origins = self.origin_mapping | other.origin_mapping
-        new_twraps = self.twrap_mapping | other.twrap_mapping
-        return TypeVarLookup(new_origins, new_twraps)
+    def __len__(self, /) -> int:
+        return len(self._origin_mapping)
+
+    def _merge(self, other: "TypeVarLookup", *, base_mode: bool) -> "TypeVarLookup":
+        new_origins = self._origin_mapping | other._origin_mapping
+        new_twraps = self._twrap_mapping | other._twrap_mapping
+        lookup = TypeVarLookup(new_origins, new_twraps)
+        lookup._eq_outward = {**self._eq_outward}
+        for k, v in other._eq_outward.items():
+            if k in lookup._eq_outward:
+                lookup._eq_outward[k].update(v)
+            else:
+                lookup._eq_outward[k] = v
+        lookup._eq_inward = {**self._eq_inward, **other._eq_inward}
+        if base_mode:
+            for in_tv, out_tvs in ((k, set(v)) for k, v in lookup._eq_outward.items()):
+                for out_tv in out_tvs:
+                    lookup._eq_outward[in_tv].update(lookup._eq_outward.get(out_tv, set()))
+        return lookup
+
+    def __or__(self, other: "TypeVarLookup", /) -> "TypeVarLookup":
+        return self._merge(other, base_mode=False)
+
+    def merge_base(self, other: "TypeVarLookup") -> "TypeVarLookup":
+        return self._merge(other, base_mode=True)
 
     def replace_with(self, type_vars: tuple[TypeVar, ...]) -> "TypeVarLookup":
         origin_mapping: dict[TypeVar, Any] = {}
         twrap_mapping: dict[TypeVar, TWrap[Any]] = {}
-        for old_var, new_var in zip(self.origin_mapping.keys(), type_vars, strict=True):
-            origin_mapping[new_var] = self.origin_mapping[old_var]
-            twrap_mapping[new_var] = self.twrap_mapping[old_var]
+        for old_var, new_var in zip(self._origin_mapping.keys(), type_vars, strict=True):
+            origin_mapping[new_var] = self._origin_mapping[old_var]
+            twrap_mapping[new_var] = self._twrap_mapping[old_var]
         return TypeVarLookup(origin_mapping, twrap_mapping)
+
+    def set_equivalents(self, base: type[Any]) -> None:
+        base_origin = get_origin(base)
+        if base_origin is None:
+            return
+        args = get_args(base)
+        base_params = (
+            getattr(base_origin, "__type_params__", None) or getattr(base_origin, "__parameters__", None) or ()
+        )
+        for param, arg in zip(base_params, args, strict=True):
+            if isinstance(arg, TypeVar) and arg in self._type_vars:
+                if arg not in self._eq_outward:
+                    self._eq_outward[arg] = set()
+                self._eq_outward[arg].add(param)
+                self._eq_inward[param] = arg
+
+    def _has_equivalent(self, type_var: TypeVar) -> bool:
+        return type_var in self._eq_inward or type_var in self._eq_outward
+
+    def _get_by_equivalent(self, mapping: dict[TypeVar, "TWrap[Any]"], type_var: TypeVar) -> "TWrap[Any]":
+        if type_var in self._eq_inward:
+            return mapping[self._eq_inward[type_var]]
+        if type_var in self._eq_outward:
+            key = next((t for t in self._eq_outward[type_var] if t in mapping), None)
+            if key is not None:
+                return mapping[key]
+            return peritype.wrap_type(Any)
+        raise KeyError(type_var)
 
 
 class TypeNode[T]:
@@ -155,25 +234,31 @@ class TypeNode[T]:
                 return True
         return False
 
+    @cached_property
+    def type_params(self) -> "tuple[TypeVar, ...]":
+        return (
+            getattr(self._inner_type, "__type_params__", None)
+            or getattr(self._inner_type, "__parameters__", None)
+            or ()
+        )
+
     def _get_bases_and_type_var_lookup(self) -> "tuple[tuple['TWrap[Any]', ...], TypeVarLookup]":
         bases: list[TWrap[Any]] = []
-        parameters = getattr(self._inner_type, "__type_params__", None) or getattr(
-            self._inner_type, "__parameters__", None
-        )
-        origin_lookup = dict(zip(parameters, self._origin_params, strict=True)) if parameters else {}
-        twrap_lookup = dict(zip(parameters, self._generic_params, strict=True)) if parameters else {}
+        type_params = self.type_params
+        origin_lookup = dict(zip(type_params, self._origin_params, strict=True)) if type_params else {}
+        twrap_lookup = dict(zip(type_params, self._generic_params, strict=True)) if type_params else {}
         lookup = TypeVarLookup(origin_lookup, twrap_lookup)
-        base_lookup = TypeVarLookup({}, {})
         origin_bases: tuple[type[Any], ...] = getattr(
             self._inner_type, "__orig_bases__", getattr(self._inner_type, "__bases__", ())
         )
         for base in origin_bases:
             if (base_origin := get_origin(base)) and base_origin is Generic:
                 continue
+            lookup.set_equivalents(base)
             base_wrap = peritype.wrap_type(base, lookup=lookup)
             bases.append(base_wrap)
-            base_lookup |= base_wrap.type_var_lookup
-        return (*bases,), base_lookup | lookup
+            lookup = lookup.merge_base(base_wrap.type_var_lookup)
+        return (*bases,), lookup
 
     @property
     def bases(self) -> tuple["TWrap[Any]", ...]:
@@ -227,7 +312,7 @@ class TypeNode[T]:
         return {**self.signature.parameters}
 
     def instantiate(self, /, *args: Any, **kwargs: Any) -> T:
-        return self._inner_type(*args, **kwargs)
+        return self._origin(*args, **kwargs)
 
     def get_method(self, method_name: str) -> "FWrap[..., Any]":
         if not hasattr(self._inner_type, method_name):
@@ -424,3 +509,34 @@ class TWrap[T]:
             if a.match(other_wrap, match_mode=match_mode):
                 return True
         return False
+
+    def is_type_of(self, value: Any) -> TypeGuard[T]:
+        if WithOriginClass.match(value):
+            return self.match(peritype.wrap_type(value.__orig_class__), match_mode="sub")
+        value_type: type[Any] = cast(type[Any], type(value))
+        return self.match(peritype.wrap_type(value_type), match_mode="sub")
+
+    def specialize_with(self, twrap: "TWrap[Any]") -> "TWrap[Any]":
+        try:
+            new_nodes: list[TypeNode[Any]] = []
+            for node in self._nodes:
+                new_params: list[TWrap[Any]] = []
+                for type_param in node.type_params:
+                    replacement = twrap.type_var_lookup.get_twrap(type_param, equivalent=self.type_var_lookup)
+                    new_params.append(replacement)
+                new_origin_params = tuple(p.inner_type for p in new_params)
+                new_origin = cast(Any, node.inner_type)[*new_origin_params]
+                new_nodes.append(TypeNode(new_origin, tuple(new_params), node.inner_type, new_origin_params))
+            new_origin = cast(Any, Union[*(n.origin for n in new_nodes)])  # pyright: ignore[reportDeprecated]
+            new_twrap = cast(
+                TWrap[Any],
+                TWrap(
+                    origin=new_origin,
+                    nodes=tuple(new_nodes),
+                    meta=self._meta,
+                ),
+            )
+            CACHE.set_twrap(new_twrap._origin, new_twrap)
+            return new_twrap
+        except KeyError as e:
+            raise IncompatibleTypesError(self._origin, twrap._origin) from e

@@ -1,9 +1,11 @@
 from collections.abc import Coroutine
-from typing import Annotated, Any, Concatenate, NotRequired
+from dataclasses import dataclass
+from typing import Annotated, Any, Concatenate, NotRequired, Protocol, runtime_checkable
 
 import pytest
 
 from peritype import TWrap, wrap_type
+from peritype.errors import IncompatibleTypesError
 
 
 def test_wrap_basic_type() -> None:
@@ -184,6 +186,7 @@ def test_super_transversal_generic_type_bases() -> None:
 
 
 def test_type_attributes() -> None:
+    @dataclass
     class GenericType[T, U]:
         attr1: T
         attr2: U
@@ -197,15 +200,19 @@ def test_type_attributes() -> None:
 
 
 def test_type_attributes_with_inherited() -> None:
+    @dataclass
     class BaseType1[T]:
         base_attr_1: T
 
+    @dataclass
     class BaseType2[T]:
         base_attr_2: T
 
+    @dataclass
     class MidType[T, U](BaseType1[U]):
         mid_attr: T
 
+    @dataclass
     class GenericType[T, U](MidType[U, int], BaseType2[T]):
         attr1: T
         attr2: U
@@ -308,6 +315,14 @@ def test_type_instantiate() -> None:
     assert instance.a == 10
     assert instance.b == "test"
 
+    @runtime_checkable
+    class WithOrigClass(Protocol):
+        __orig_class__: type[Any]
+
+    assert isinstance(instance, WithOrigClass)
+    orig_twrap = wrap_type(instance.__orig_class__)
+    assert orig_twrap is twrap
+
 
 def test_fail_type_instantiate_union() -> None:
     t_union = wrap_type(int | str)
@@ -364,6 +379,7 @@ def test_generic_bases() -> None:
 def test_annotated_type_cached() -> None:
     class SuperType[T]: ...
 
+    @dataclass
     class SubType[T](SuperType[T]):
         parent1: Annotated[SuperType[T], "parent"]
         parent2: Annotated[SuperType[T], "parent"]
@@ -386,6 +402,7 @@ def test_generic_attribute_with_union() -> None:
 
     class ClassB[T]: ...
 
+    @dataclass
     class ClassC[T, U]:
         attr: ClassA[T] | ClassB[U]
 
@@ -406,6 +423,7 @@ def test_generic_attribute_with_union_type_alias() -> None:
 
     type ClassAorB[S, R] = ClassA[R] | ClassB[S]  # pyright: ignore[reportGeneralTypeIssues]
 
+    @dataclass
     class ClassC[T, U]:
         attr: ClassAorB[T, U]
 
@@ -467,3 +485,203 @@ def test_match_super_generic_type_with_generic_params() -> None:
 
     assert wrap_type(SubType[int]).match(SuperType[int | str], match_mode="super")
     assert wrap_type(SubType[int]).match(SuperType[Any], match_mode="super")
+
+
+def test_obj_instance_of_builtin() -> None:
+    assert wrap_type(int).is_type_of(5)
+    assert not wrap_type(int).is_type_of("test")
+    assert wrap_type(int).is_type_of(True)
+
+
+def test_obj_instance_of_union() -> None:
+    assert wrap_type(int | str).is_type_of(5)
+    assert wrap_type(int | str).is_type_of("test")
+    assert not wrap_type(int | str).is_type_of(3.14)
+
+
+def test_obj_instance_of_generic() -> None:
+    class GenericType[T]:
+        pass
+
+    assert wrap_type(GenericType[int]).is_type_of(GenericType[int]())
+    assert not wrap_type(GenericType[int]).is_type_of(GenericType[str]())
+
+
+def test_obj_instance_of_generic_parent() -> None:
+    class GenericType[T]:
+        pass
+
+    class SubType(GenericType[int]):
+        pass
+
+    assert wrap_type(SubType).is_type_of(SubType())
+    assert wrap_type(GenericType[int]).is_type_of(SubType())
+
+
+def test_obj_generic_instance_of_generic_parent() -> None:
+    class GenericType[T]:
+        pass
+
+    class SubType[T, U](GenericType[U]):
+        pass
+
+    assert wrap_type(SubType[str, int]).is_type_of(SubType[str, int]())
+    assert wrap_type(GenericType[int]).is_type_of(SubType[str, int]())
+
+    assert not wrap_type(SubType[int, str]).is_type_of(SubType[int, int]())
+    assert not wrap_type(GenericType[str]).is_type_of(SubType[int, int]())
+
+
+def test_specialize_twrap() -> None:
+    class GenericType[T]:
+        pass
+
+    class SubType[T](GenericType[T]):
+        pass
+
+    super_any = wrap_type(GenericType[Any])
+    sub_int = wrap_type(SubType[int])
+
+    assert super_any.specialize_with(sub_int) is wrap_type(GenericType[int])
+
+
+def test_reverse_specialize_twrap() -> None:
+    class GenericType[T]:
+        pass
+
+    class SubType[T](GenericType[T]):
+        pass
+
+    super_int = wrap_type(GenericType[int])
+    sub_any = wrap_type(SubType[Any])
+
+    assert sub_any.specialize_with(super_int) is wrap_type(SubType[int])
+
+
+def test_specialize_twrap_three_levels() -> None:
+    class GenericType[A]:
+        pass
+
+    class SubType[B](GenericType[B]):
+        pass
+
+    class SubsubType[C](SubType[C]):
+        pass
+
+    super_any = wrap_type(GenericType[Any])
+    subsub_int = wrap_type(SubsubType[int])
+
+    assert super_any.specialize_with(subsub_int) is wrap_type(GenericType[int])
+
+
+def test_reverse_specialize_twrap_three_levels() -> None:
+    class GenericType[A]:
+        pass
+
+    class SubType[B](GenericType[B]):
+        pass
+
+    class SubsubType[C](SubType[C]):
+        pass
+
+    super_int = wrap_type(GenericType[int])
+    subsub_any = wrap_type(SubsubType[Any])
+
+    assert subsub_any.specialize_with(super_int) is wrap_type(SubsubType[int])
+
+
+def test_specialize_twrap_four_levels() -> None:
+    class GenericType[A]:
+        pass
+
+    class SubType[B](GenericType[B]):
+        pass
+
+    class SubsubType[C](SubType[C]):
+        pass
+
+    class SubsubsubType[D](SubsubType[D]):
+        pass
+
+    super_any = wrap_type(GenericType[Any])
+    subsubsub_int = wrap_type(SubsubsubType[int])
+
+    assert super_any.specialize_with(subsubsub_int) is wrap_type(GenericType[int])
+
+
+def test_reverse_specialize_twrap_four_levels() -> None:
+    class GenericType[A]:
+        pass
+
+    class SubType[B](GenericType[B]):
+        pass
+
+    class SubsubType[C](SubType[C]):
+        pass
+
+    class SubsubsubType[D](SubsubType[D]):
+        pass
+
+    super_int = wrap_type(GenericType[int])
+    subsubsub_any = wrap_type(SubsubsubType[Any])
+
+    assert subsubsub_any.specialize_with(super_int) is wrap_type(SubsubsubType[int])
+
+
+def test_specialize_twrap_fork() -> None:
+    class GenericParent1[A1]:
+        pass
+
+    class GenericParent2[A2]:
+        pass
+
+    class SubType[B1, B2](GenericParent1[B1], GenericParent2[B2]):
+        pass
+
+    class SubsubType[C1, C2](SubType[C1, C2]):
+        pass
+
+    super1_any = wrap_type(GenericParent1[Any])
+    super2_any = wrap_type(GenericParent2[Any])
+    subsub_int_str = wrap_type(SubsubType[int, str])
+
+    assert super1_any.specialize_with(subsub_int_str) is wrap_type(GenericParent1[int])
+    assert super2_any.specialize_with(subsub_int_str) is wrap_type(GenericParent2[str])
+
+
+def test_reverse_partial_specialize_twrap_fork() -> None:
+    class GenericParent1[A1]:
+        pass
+
+    class GenericParent2[A2]:
+        pass
+
+    class SubType[B1, B2](GenericParent1[B1], GenericParent2[B2]):
+        pass
+
+    class SubsubType[C1, C2](SubType[C1, C2]):
+        pass
+
+    super1_int = wrap_type(GenericParent1[int])
+    super2_str = wrap_type(GenericParent2[str])
+    subsub_any_any = wrap_type(SubsubType[Any, Any])
+
+    assert subsub_any_any.specialize_with(super1_int) is wrap_type(SubsubType[int, Any])
+    assert subsub_any_any.specialize_with(super2_str) is wrap_type(SubsubType[Any, str])
+
+
+def test_fail_specialize_twrap_no_match() -> None:
+    class GenericType[T]:
+        pass
+
+    class OtherType[T]:
+        pass
+
+    super_any = wrap_type(GenericType[Any])
+    other_int = wrap_type(OtherType[int])
+
+    with pytest.raises(IncompatibleTypesError) as exc_info:
+        super_any.specialize_with(other_int)
+
+    assert exc_info.value.c1 is GenericType[Any]
+    assert exc_info.value.c2 is OtherType[int]

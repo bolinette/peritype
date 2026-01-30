@@ -2,8 +2,8 @@ from typing import Any
 
 import pytest
 
+from peritype import wrap_type
 from peritype.collections import TypeBag
-from peritype.wrap import wrap_type
 
 
 def test_type_bag() -> None:

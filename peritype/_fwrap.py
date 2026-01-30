@@ -3,12 +3,12 @@ from collections.abc import Callable, Collection
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, TypeVar, get_type_hints, override
 
+from peritype._twrap import TWrap
 from peritype.errors import UnresolvedFunctionTypeVarsError, UnresolvedTypeVarError
-from peritype.twrap import TWrap
-from peritype.utils import find_type_var_equivalents
+from peritype.utils._generics import find_type_var_equivalents
 
 if TYPE_CHECKING:
-    from peritype.twrap import TWrap, TypeVarLookup
+    from peritype._twrap import TWrap, TypeVarLookup
 
 
 class FWrap[**FuncP, FuncT]:
@@ -46,9 +46,7 @@ class FWrap[**FuncP, FuncT]:
     @cached_property
     def is_defined(self) -> bool:
         if self.is_generic:
-            return self._type_var_lookup is not None and len(self._type_var_lookup.twrap_mapping) == len(
-                self.type_params
-            )
+            return self._type_var_lookup is not None and len(self._type_var_lookup) == len(self.type_params)
         return True
 
     def param_at(self, index: int) -> inspect.Parameter:
@@ -56,7 +54,7 @@ class FWrap[**FuncP, FuncT]:
         return all_params[index]
 
     def get_signature_hints(self, belongs_to: "TWrap[Any] | None" = None) -> "dict[str, TWrap[Any]]":
-        from peritype.twrap import TypeVarLookup
+        from peritype._twrap import TypeVarLookup
 
         if belongs_to not in self._signature_hints:
             match (belongs_to, self._type_var_lookup):
@@ -108,7 +106,7 @@ class FWrap[**FuncP, FuncT]:
         return BoundFWrap(self.func, belongs_to)
 
     def specialize(self, params: Collection[TWrap[Any]]) -> "FWrap[FuncP, FuncT]":
-        from peritype.twrap import TypeVarLookup
+        from peritype._twrap import TypeVarLookup
 
         if not self.is_generic:
             return self
@@ -120,7 +118,7 @@ class FWrap[**FuncP, FuncT]:
 
     def unspecialize(self) -> "FWrap[FuncP, FuncT]":
         from peritype import wrap_type
-        from peritype.twrap import TypeVarLookup
+        from peritype._twrap import TypeVarLookup
 
         wrap_any = wrap_type(Any)
         origin_lookup = {tv: Any for tv in self.type_params}

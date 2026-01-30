@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from typing import Any, overload
 
-from peritype.twrap import TWrap
+from peritype._twrap import TWrap
 
 
 class TypeMap[K, V]:

@@ -1,7 +1,7 @@
 from typing import Any, ForwardRef, Generic, get_origin
 
+from peritype._wrap import TWrap
 from peritype.collections import TypeSetMap
-from peritype.wrap import TWrap
 
 
 class TypeSuperTree:

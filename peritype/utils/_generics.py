@@ -14,9 +14,9 @@ from typing import (
     get_origin,
 )
 
+from peritype._mapping import TypeVarMapping
+from peritype._twrap import TWrapMeta
 from peritype.errors import UnresolvedForwardRefError, UnresolvedTypeVarError
-from peritype.mapping import TypeVarMapping
-from peritype.twrap import TWrapMeta
 
 
 def unpack_annotations(cls: Any, meta: TWrapMeta) -> Any:
@@ -158,12 +158,6 @@ def find_type_var_equivalents(
     for arg1, arg2 in zip(args1, args2, strict=True):
         find_type_var_equivalents(arg1, arg2, lookup=lookup)
     return lookup
-
-
-def use_cache(value: bool) -> None:
-    from peritype import wrap
-
-    wrap.USE_CACHE = value
 
 
 def fill_params_in(cls_: type[Any], vars: tuple[Any, ...]) -> tuple[type[Any], tuple[Any, ...]]:
