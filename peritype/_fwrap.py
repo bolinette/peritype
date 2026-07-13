@@ -67,7 +67,8 @@ class FWrap[**FuncP, FuncT]:
                 case _:
                     lookup = None
             self._signature_hints[belongs_to] = {
-                n: self._transform_annotation(c, lookup) for n, c in get_type_hints(self.func).items()
+                n: self._transform_annotation(c, lookup)
+                for n, c in get_type_hints(self.func, include_extras=True).items()
             }
         return self._signature_hints[belongs_to]
 
@@ -130,7 +131,7 @@ class FWrap[**FuncP, FuncT]:
 
         if not self.is_generic:
             return self
-        hints = get_type_hints(self.func)
+        hints = get_type_hints(self.func, include_extras=True)
         return_anno = hints.get("return", Any)
         type_var_equivalents = find_type_var_equivalents(return_anno, return_type.origin)
         if len(type_var_equivalents) != len(self.type_params):

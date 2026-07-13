@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 
@@ -203,3 +203,15 @@ def test_wrap_specialize_non_generic_function() -> None:
     def func(x: int) -> int: ...
 
     assert wrap_func(func).specialize((wrap_type(str),)) is wrap_func(func)
+
+
+def test_get_annotations_from_func_params() -> None:
+    def func(x: Annotated[int, "test"]) -> None: ...
+
+    wrap = wrap_func(func)
+
+    sig = wrap.get_signature_hints()
+    assert "x" in sig
+
+    anno_x = sig["x"]
+    assert anno_x.annotations == ("test",)
