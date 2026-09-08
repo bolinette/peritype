@@ -4,12 +4,17 @@ from types import UnionType
 from typing import (
     Annotated,
     Any,
+    ClassVar,
+    Final,
     ForwardRef,
     NotRequired,
     ParamSpec,
+    ReadOnly,
+    Required,
     TypeAliasType,
     TypeVar,
     Union,  # pyright: ignore[reportDeprecated]
+    cast,
     get_args,
     get_origin,
 )
@@ -21,25 +26,35 @@ from peritype.errors import UnresolvedForwardRefError, UnresolvedTypeVarError
 
 def unpack_annotations(cls: Any, meta: TWrapMeta) -> Any:
     if isinstance(cls, TypeAliasType):
-        return unpack_annotations(cls.__value__, meta)
+        any_lookup: dict[TypeVar, Any] = dict.fromkeys(cast(tuple[TypeVar, ...], cls.__type_params__), Any)
+        return unpack_annotations(specialize_type(cls.__value__, any_lookup), meta)
     origin = get_origin(cls)
+    if isinstance(origin, TypeAliasType):
+        return unpack_annotations(specialize_type(cls, {}), meta)
     if origin is Annotated:
-        cls, *annotated = get_args(cls)
-        meta.annotated = (*annotated,)
-        return unpack_annotations(cls, meta)
+        inner, *annotated = get_args(cls)
+        unpacked = unpack_annotations(inner, meta)
+        meta.annotated = (*meta.annotated, *annotated)
+        return unpacked
     if origin is NotRequired:
         meta.required = False
         return unpack_annotations(get_args(cls)[0], meta)
-    meta.total = getattr(cls, "__total__", True)
+    if origin is Required:
+        meta.required = True
+        return unpack_annotations(get_args(cls)[0], meta)
+    if origin in (ReadOnly, ClassVar, Final):
+        return unpack_annotations(get_args(cls)[0], meta)
+    if cls is ClassVar or cls is Final:
+        return Any
+    meta.total = meta.total and getattr(cls, "__total__", True)
     return cls
 
 
-def unpack_union(cls: Any) -> tuple[Any, ...]:
-    origin = get_origin(cls)
-    if origin in (UnionType, Union):  # pyright: ignore[reportDeprecated]
-        return get_args(cls)
-    else:
-        return (cls,)
+def unpack_members(cls: Any, meta: TWrapMeta) -> tuple[Any, ...]:
+    unpacked = unpack_annotations(cls, meta)
+    if get_origin(unpacked) in (UnionType, Union):  # pyright: ignore[reportDeprecated]
+        return tuple(member for arg in get_args(unpacked) for member in unpack_members(arg, meta))
+    return (unpacked,)
 
 
 def get_generics[GenT](
@@ -75,13 +90,25 @@ def specialize_type(
 ) -> Any:
     origin = get_origin(cls)
     match origin:
+        case None if isinstance(cls, TypeVar) and cls in lookup:
+            return lookup[cls]
         case None:
             return cls
         case _ if isinstance(origin, TypeAliasType):
+            alias_args = tuple(
+                _specialize_arg(
+                    arg,
+                    lookup,
+                    origin,
+                    raise_on_forward=raise_on_forward,
+                    raise_on_typevar=raise_on_typevar,
+                )
+                for arg in get_args(cls)
+            )
+            alias_lookup = dict(zip(cast(tuple[TypeVar, ...], origin.__type_params__), alias_args, strict=True))
             return specialize_type(
-                cls.__value__,
-                # Type aliases redefine their TypeVars, so we need to replace them in the lookup
-                lookup.replace_with(cls.__type_params__),
+                origin.__value__,
+                alias_lookup,
                 raise_on_forward=raise_on_forward,
                 raise_on_typevar=raise_on_typevar,
             )
@@ -106,7 +133,7 @@ def specialize_type(
                 )
                 new_args.append(specialized_arg)
             return Union[*new_args]  # pyright: ignore[reportDeprecated]
-        case _ if origin is NotRequired:
+        case _ if origin in (NotRequired, Required, ReadOnly, ClassVar, Final):
             base = get_args(cls)[0]
             specialized_base = specialize_type(
                 base,
@@ -114,29 +141,45 @@ def specialize_type(
                 raise_on_forward=raise_on_forward,
                 raise_on_typevar=raise_on_typevar,
             )
-            return NotRequired[specialized_base]
+            return origin[specialized_base]
         case _:
             pass
     args = get_args(cls)
     if not args:
         return cls
-    new_args: list[Any] = []
-    specialized = False
-    for arg in args:
-        match arg:
-            case TypeVar() if arg in lookup:
-                new_args.append(lookup[arg])
-                specialized = True
-            case TypeVar() if raise_on_typevar:
-                raise UnresolvedTypeVarError(arg.__name__, cls=origin)
-            case ForwardRef() if raise_on_forward:
-                raise UnresolvedForwardRefError(arg.__forward_arg__, cls=origin)
-            case _:
-                new_args.append(arg)
-    vars = tuple(new_args)
-    if not specialized:
+    specialized_args = tuple(
+        _specialize_arg(arg, lookup, origin, raise_on_forward=raise_on_forward, raise_on_typevar=raise_on_typevar)
+        for arg in args
+    )
+    if specialized_args == args:
         return cls
-    return origin[vars]
+    return origin[specialized_args]
+
+
+def _specialize_arg(
+    arg: Any,
+    lookup: TypeVarMapping,
+    origin: Any,
+    *,
+    raise_on_forward: bool,
+    raise_on_typevar: bool,
+) -> Any:
+    match arg:
+        case TypeVar() if arg in lookup:
+            return lookup[arg]
+        case TypeVar() if raise_on_typevar:
+            raise UnresolvedTypeVarError(arg.__name__, cls=origin)
+        case ForwardRef() if raise_on_forward:
+            raise UnresolvedForwardRefError(arg.__forward_arg__, cls=origin)
+        case list():
+            return [
+                _specialize_arg(
+                    item, lookup, origin, raise_on_forward=raise_on_forward, raise_on_typevar=raise_on_typevar
+                )
+                for item in cast(list[Any], arg)
+            ]
+        case _:
+            return specialize_type(arg, lookup, raise_on_forward=raise_on_forward, raise_on_typevar=raise_on_typevar)
 
 
 def find_type_var_equivalents(

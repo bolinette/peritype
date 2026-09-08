@@ -15,7 +15,10 @@ package = "peritype"
 module-root = ""
 
 [dependency-groups]
-dev = ["ruff>=0.14.11"]
+dev = [
+    "pyright>=1.1.400",
+    "ruff>=0.14.11",
+]
 test = ["pytest>=9.0.2", "pytest-cov>=7.0.0"]
 
 [tool.ruff]
@@ -28,3 +31,38 @@ fixable = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["I001"]
+"tests/**" = ["UP006", "UP007", "UP035", "UP045"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+xfail_strict = true
+addopts = "-ra"
+markers = [
+    "known_bug(reason): intended behaviour the library does not implement yet; turned into a strict xfail",
+]
+
+[tool.coverage.run]
+source = ["peritype"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.pyright]
+include = ["peritype", "tests"]
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "strict"
+deprecateTypingAliases = true
+reportCallInDefaultInitializer = "error"
+reportImplicitOverride = "error"
+reportPropertyTypeMismatch = "error"
+reportUninitializedInstanceVariable = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnreachable = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportUninitializedInstanceVariable = "none"
+reportDeprecated = "none"

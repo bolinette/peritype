@@ -1,14 +1,14 @@
 import inspect
 from collections.abc import Callable, Collection
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, TypeVar, get_type_hints, override
+from typing import TYPE_CHECKING, Any, TypeVar, cast, get_type_hints, override
 
 from peritype._twrap import TWrap
 from peritype.errors import UnresolvedFunctionTypeVarsError, UnresolvedTypeVarError
 from peritype.utils._generics import find_type_var_equivalents
 
 if TYPE_CHECKING:
-    from peritype._twrap import TWrap, TypeVarLookup
+    from peritype._twrap import TypeVarLookup
 
 
 class FWrap[**FuncP, FuncT]:
@@ -103,6 +103,13 @@ class FWrap[**FuncP, FuncT]:
     def __hash__(self) -> int:
         return hash(self.func)
 
+    @override
+    def __eq__(self, value: object) -> bool:
+        if type(value) is not type(self):
+            return False
+        other = cast(FWrap[Any, Any], value)
+        return other.func == self.func and other._type_var_lookup is self._type_var_lookup
+
     def bind(self, belongs_to: "TWrap[Any]") -> "BoundFWrap[FuncP, FuncT]":
         return BoundFWrap(self.func, belongs_to)
 
@@ -143,6 +150,14 @@ class BoundFWrap[**FuncP, FuncT](FWrap[FuncP, FuncT]):
     def __init__(self, func: Callable[FuncP, FuncT], belongs_to: "TWrap[Any]") -> None:
         super().__init__(func)
         self._belongs_to = belongs_to
+
+    @override
+    def __hash__(self) -> int:
+        return hash((self.func, self._belongs_to))
+
+    @override
+    def __eq__(self, value: object) -> bool:
+        return super().__eq__(value) and cast(BoundFWrap[Any, Any], value)._belongs_to == self._belongs_to
 
     @override
     def get_signature_hints(self, belongs_to: "TWrap[Any] | None" = None) -> "dict[str, TWrap[Any]]":

@@ -5,3 +5,9 @@ from peritype.utils._typing import (
     WithParameters as WithParameters,
     WithTypeParams as WithTypeParams,
 )
+from peritype.utils._match import (
+    MatchKind as MatchKind,
+    MatchResult as MatchResult,
+    strongest_kind as strongest_kind,
+    weakest_kind as weakest_kind,
+)

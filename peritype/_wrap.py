@@ -1,16 +1,16 @@
 from collections.abc import Callable
-from typing import Any, cast, overload
+from typing import Any, TypeVar, cast, overload
 
 from peritype import FWrap, TWrap
 from peritype._mapping import TypeVarMapping
 from peritype._twrap import TWrapMeta, TypeNode
+from peritype.errors import UnresolvedTypeVarError
 from peritype.utils._cache import CACHE
 from peritype.utils._generics import (
     fill_params_in,
     get_generics,
     specialize_type,
-    unpack_annotations,
-    unpack_union,
+    unpack_members,
 )
 
 
@@ -31,13 +31,16 @@ def wrap_type(
     *,
     lookup: TypeVarMapping | None = None,
 ) -> Any:
+    if isinstance(cls, TWrap):
+        return cast(TWrap[Any], cls)
     if lookup is not None:
         cls = specialize_type(cls, lookup, raise_on_forward=True, raise_on_typevar=True)
+    if isinstance(cls, TypeVar):
+        raise UnresolvedTypeVarError(cls.__name__)
     if CACHE.contains_twrap(cls):
         return CACHE.get_twrap(cls)
     meta = TWrapMeta(annotated=tuple[Any](), required=True, total=True)
-    unpacked: Any = unpack_annotations(cls, meta)
-    nodes = unpack_union(unpacked)
+    nodes = unpack_members(cls, meta)
     wrapped_nodes: list[Any] = []
     for node in nodes:
         if node in (None, type(None)):

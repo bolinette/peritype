@@ -1,3 +1,4 @@
+from types import get_original_bases
 from typing import Any, Generic, Protocol, TypeGuard, TypeVar, get_origin
 
 
@@ -6,11 +7,11 @@ class WithOriginBases(Protocol):
 
     @staticmethod
     def match(_obj: Any) -> "TypeGuard[WithOriginBases]":
-        return hasattr(_obj, "__orig_bases__")
+        return "__orig_bases__" in getattr(_obj, "__dict__", {})
 
     @staticmethod
     def get_origin_bases(_obj: Any) -> tuple[type[Any], ...]:
-        return tuple(base for base in _obj.__orig_bases__ if get_origin(base) not in (None, Generic))
+        return tuple(base for base in get_original_bases(_obj) if get_origin(base) not in (None, Generic))
 
 
 class WithOriginClass(Protocol):

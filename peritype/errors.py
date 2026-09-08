@@ -2,9 +2,10 @@ from typing import Any
 
 
 class PeritypeError(Exception):
-    def __init__(self, message: str, cls: type[Any] | None = None) -> None:
+    def __init__(self, message: str, cls: Any = None) -> None:
         if cls is not None:
-            message = f"{cls.__qualname__}: {message}"
+            name = cls.__qualname__ if isinstance(cls, type) else repr(cls)
+            message = f"{name}: {message}"
         super().__init__(message)
         self.cls = cls
 
@@ -22,7 +23,7 @@ class UnresolvedTypeVarError(PeritypeError):
 
 
 class IncompatibleTypesError(PeritypeError):
-    def __init__(self, c1: type[Any], c2: type[Any]) -> None:
+    def __init__(self, c1: Any, c2: Any) -> None:
         super().__init__(f"Incompatible with type {c2}", cls=c1)
         self.c1 = c1
         self.c2 = c2

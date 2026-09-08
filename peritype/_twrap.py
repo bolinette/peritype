@@ -1,13 +1,16 @@
 import inspect
 from collections.abc import Iterator
 from functools import cached_property
-from types import NoneType
+from types import NoneType, get_original_bases
 from typing import (
     TYPE_CHECKING,
+    Annotated,
     Any,
     ForwardRef,
     Generic,
     Literal,
+    NotRequired,
+    Protocol,
     TypeGuard,
     TypeVar,
     Union,  # pyright: ignore[reportDeprecated]
@@ -19,21 +22,20 @@ from typing import (
 )
 
 import peritype
-from peritype.errors import IncompatibleTypesError, UnresolvedTypeVarError
-from peritype.utils import WithOriginClass
-from peritype.utils._cache import CACHE
+from peritype.errors import IncompatibleTypesError, UnresolvedForwardRefError, UnresolvedTypeVarError
+from peritype.utils import MatchKind, MatchResult, WithOriginClass, strongest_kind, weakest_kind
 
 if TYPE_CHECKING:
     from peritype._fwrap import BoundFWrap, FWrap
 
-type MatchMode = Literal["exact", "super", "sub", "any"]
+type Lineage = Literal["none", "super", "sub", "both"]
 
 
 class TWrapMeta:
     def __init__(
         self,
         *,
-        annotated: tuple[Any],
+        annotated: tuple[Any, ...],
         required: bool,
         total: bool,
     ) -> None:
@@ -43,11 +45,20 @@ class TWrapMeta:
 
     @cached_property
     def _hash(self) -> int:
-        return hash((self.annotated, self.required, self.total))
+        try:
+            return hash((self.annotated, self.required, self.total))
+        except TypeError:
+            return hash((tuple(map(repr, self.annotated)), self.required, self.total))
 
     @override
     def __hash__(self) -> int:
         return self._hash
+
+    @override
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, TWrapMeta):
+            return False
+        return (self.annotated, self.required, self.total) == (value.annotated, value.required, value.total)
 
 
 class TypeVarLookup:
@@ -87,12 +98,12 @@ class TypeVarLookup:
         new_origins = self._origin_mapping | other._origin_mapping
         new_twraps = self._twrap_mapping | other._twrap_mapping
         lookup = TypeVarLookup(new_origins, new_twraps)
-        lookup._eq_outward = {**self._eq_outward}
+        lookup._eq_outward = {k: set(v) for k, v in self._eq_outward.items()}
         for k, v in other._eq_outward.items():
             if k in lookup._eq_outward:
                 lookup._eq_outward[k].update(v)
             else:
-                lookup._eq_outward[k] = v
+                lookup._eq_outward[k] = set(v)
         lookup._eq_inward = {**self._eq_inward, **other._eq_inward}
         if base_mode:
             for in_tv, out_tvs in ((k, set(v)) for k, v in lookup._eq_outward.items()):
@@ -106,14 +117,6 @@ class TypeVarLookup:
     def merge_base(self, other: "TypeVarLookup") -> "TypeVarLookup":
         return self._merge(other, base_mode=True)
 
-    def replace_with(self, type_vars: tuple[TypeVar, ...]) -> "TypeVarLookup":
-        origin_mapping: dict[TypeVar, Any] = {}
-        twrap_mapping: dict[TypeVar, TWrap[Any]] = {}
-        for old_var, new_var in zip(self._origin_mapping.keys(), type_vars, strict=True):
-            origin_mapping[new_var] = self._origin_mapping[old_var]
-            twrap_mapping[new_var] = self._twrap_mapping[old_var]
-        return TypeVarLookup(origin_mapping, twrap_mapping)
-
     def set_equivalents(self, base: type[Any]) -> None:
         base_origin = get_origin(base)
         if base_origin is None:
@@ -122,7 +125,7 @@ class TypeVarLookup:
         base_params = (
             getattr(base_origin, "__type_params__", None) or getattr(base_origin, "__parameters__", None) or ()
         )
-        for param, arg in zip(base_params, args, strict=True):
+        for param, arg in zip(base_params, args, strict=False):
             if isinstance(arg, TypeVar) and arg in self._type_vars:
                 if arg not in self._eq_outward:
                     self._eq_outward[arg] = set()
@@ -204,7 +207,8 @@ class TypeNode[T]:
 
     @cached_property
     def _hash(self) -> int:
-        return hash((self._inner_type, self._generic_params))
+        inner: Any = self._inner_type
+        return hash((inner.__class__, inner, self._generic_params))
 
     @override
     def __hash__(self) -> int:
@@ -214,7 +218,12 @@ class TypeNode[T]:
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, TypeNode):
             return False
-        return hash(self) == hash(value)  # pyright: ignore[reportUnknownArgumentType]
+        other = cast(TypeNode[Any], value)
+        return (
+            type(self._inner_type) is type(other._inner_type)
+            and self._inner_type == other._inner_type
+            and self._generic_params == other._generic_params
+        )
 
     def __getitem__(self, index: int) -> "TWrap[Any]":
         return self._generic_params[index]
@@ -248,11 +257,12 @@ class TypeNode[T]:
         origin_lookup = dict(zip(type_params, self._origin_params, strict=True)) if type_params else {}
         twrap_lookup = dict(zip(type_params, self._generic_params, strict=True)) if type_params else {}
         lookup = TypeVarLookup(origin_lookup, twrap_lookup)
-        origin_bases: tuple[type[Any], ...] = getattr(
-            self._inner_type, "__orig_bases__", getattr(self._inner_type, "__bases__", ())
-        )
+        try:
+            origin_bases: tuple[type[Any], ...] = get_original_bases(self._inner_type)
+        except TypeError:
+            origin_bases = ()
         for base in origin_bases:
-            if (base_origin := get_origin(base)) and base_origin is Generic:
+            if get_origin(base) in (Generic, Protocol):
                 continue
             lookup.set_equivalents(base)
             base_wrap = peritype.wrap_type(base, lookup=lookup)
@@ -274,38 +284,33 @@ class TypeNode[T]:
 
     @cached_property
     def attribute_hints(self) -> "dict[str, TWrap[Any]]":
-        if self._inner_type is NoneType:
+        cls: Any = self._inner_type
+        if not isinstance(cls, type):
             return {}
-        return self._get_recursive_attribute_hints(self._inner_type)
-
-    def _get_recursive_attribute_hints(self, cls: type[Any]) -> "dict[str, TWrap[Any]]":
-        attr_hints: dict[str, TWrap[Any]] = {}
         try:
-            for base in cls.__bases__:
-                attr_hints |= self._get_recursive_attribute_hints(base)
-            raw_ints: dict[str, type[Any] | TypeVar] = get_type_hints(cls, include_extras=True)
-            for attr_name, hint in raw_ints.items():
-                if isinstance(hint, TypeVar):
-                    if hint in self.type_var_lookup:
-                        attr_hints[attr_name] = peritype.wrap_type(self.type_var_lookup[hint])
-                    else:
-                        raise UnresolvedTypeVarError(hint.__name__, cls=cls)
-                else:
-                    attr_hints[attr_name] = peritype.wrap_type(hint, lookup=self.type_var_lookup)
-        except (AttributeError, TypeError, NameError):
-            return attr_hints
+            raw_hints: dict[str, Any] = get_type_hints(cls, include_extras=True)
+        except NameError as e:
+            raise UnresolvedForwardRefError(e.name or str(e), cls=cls) from e
+        attr_hints: dict[str, TWrap[Any]] = {}
+        for attr_name, hint in raw_hints.items():
+            if isinstance(hint, TypeVar):
+                if hint not in self.type_var_lookup:
+                    raise UnresolvedTypeVarError(hint.__name__, cls=cls)
+                attr_hints[attr_name] = self.type_var_lookup.get_twrap(hint)
+            else:
+                attr_hints[attr_name] = peritype.wrap_type(hint, lookup=self.type_var_lookup)
         return attr_hints
 
     @cached_property
     def init(self) -> "FWrap[..., Any]":
-        if not hasattr(self._inner_type, "__init__"):
-            raise TypeError("No __init__ method found in type nodes")
-        init_func = self._inner_type.__init__
-        return peritype.wrap_func(init_func)
+        return peritype.wrap_func(self._inner_type.__init__)
 
     @cached_property
     def signature(self) -> inspect.Signature:
-        return self.init.signature
+        try:
+            return inspect.signature(self._inner_type)
+        except ValueError:
+            return inspect.Signature([*self.init.signature.parameters.values()][1:])
 
     @cached_property
     def parameters(self) -> dict[str, inspect.Parameter]:
@@ -320,51 +325,65 @@ class TypeNode[T]:
         method_func = getattr(self._inner_type, method_name)
         return peritype.wrap_func(method_func)
 
-    def match(self, other: "TWrap[Any]", *, match_mode: MatchMode = "exact") -> bool:
+    def match(self, other: "TWrap[Any]", *, strict: bool = False, lineage: Lineage = "none") -> MatchResult:
+        best: MatchKind = "none"
         for other_node in other.nodes:
-            if self._nodes_intersect(other_node, match_mode=match_mode):
-                return True
-        return False
+            best = strongest_kind(best, self._nodes_intersect(other_node, lineage=lineage, strict=strict))
+            if best == "exact":
+                break
+        return MatchResult(best)
 
-    def _match_super(self, b: "TypeNode[Any]") -> bool:
+    def matches(self, other: "TWrap[Any]", *, strict: bool = False, lineage: Lineage = "none") -> bool:
+        return bool(self.match(other, strict=strict, lineage=lineage))
+
+    def _match_super(self, b: "TypeNode[Any]", strict: bool) -> MatchKind:
+        best: MatchKind = "none"
         for base in self.bases:
-            if b.match(base):
-                return True
-        return False
+            for base_node in base.nodes:
+                best = strongest_kind(best, base_node._nodes_intersect(b, lineage="super", strict=strict))
+                if best == "exact":
+                    return "lineage"
+        return weakest_kind(best, "lineage")
 
-    def _match_sub(self, b: "TypeNode[Any]") -> bool:
+    def _match_sub(self, b: "TypeNode[Any]", strict: bool) -> MatchKind:
+        best: MatchKind = "none"
         for base in b.bases:
-            if self.match(base):
-                return True
-        return False
+            for base_node in base.nodes:
+                best = strongest_kind(best, self._nodes_intersect(base_node, lineage="sub", strict=strict))
+                if best == "exact":
+                    return "lineage"
+        return weakest_kind(best, "lineage")
 
-    def _nodes_intersect(self, b: "TypeNode[Any]", *, match_mode: MatchMode = "exact") -> bool:
+    def _nodes_intersect(self, b: "TypeNode[Any]", *, lineage: Lineage, strict: bool) -> MatchKind:
         if self._origin is Any or b._origin is Any:
-            return True
+            if self._origin is b._origin:
+                return "exact"
+            return "none" if strict else "catchall"
         if self._origin is Ellipsis or b._origin is Ellipsis:
-            return True
+            if self._origin is b._origin:
+                return "exact"
+            return "none" if strict else "catchall"
 
         if self._inner_type is not b._inner_type:
-            match match_mode:
-                case "exact":
-                    return False
+            match lineage:
+                case "none":
+                    return "none"
                 case "super":
-                    return self._match_super(b)
+                    return self._match_super(b, strict=strict)
                 case "sub":
-                    return self._match_sub(b)
-                case "any":
-                    return self._match_super(b) or self._match_sub(b)
-
-        if not self._generic_params and not b._generic_params:
-            return True
+                    return self._match_sub(b, strict=strict)
+                case "both":
+                    return strongest_kind(self._match_super(b, strict=strict), self._match_sub(b, strict=strict))
 
         if len(self._generic_params) != len(b._generic_params):
-            return False
+            return "none"
 
-        for i in range(len(self._generic_params)):
-            if not self._generic_params[i].match(b._generic_params[i]):
-                return False
-        return True
+        result: MatchKind = "exact"
+        for own_param, other_param in zip(self._generic_params, b._generic_params, strict=True):
+            result = weakest_kind(result, own_param.match(other_param, strict=strict).kind)
+            if result == "none":
+                break
+        return result
 
 
 class TWrap[T]:
@@ -392,7 +411,8 @@ class TWrap[T]:
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, TWrap):
             return False
-        return hash(self) == hash(value)  # pyright: ignore[reportUnknownArgumentType]
+        other = cast(TWrap[Any], value)
+        return set(self._nodes) == set(other._nodes) and self._meta == other._meta
 
     @cached_property
     def _str(self) -> str:
@@ -453,22 +473,26 @@ class TWrap[T]:
         return any(n.inner_type is NoneType for n in self._nodes)
 
     @cached_property
+    def _main_node(self) -> TypeNode[Any]:
+        return next((n for n in self._nodes if n.inner_type is not NoneType), self._nodes[0])
+
+    @cached_property
     def attribute_hints(self) -> "dict[str, TWrap[Any]]":
         if self.union:
             raise TypeError("Cannot get attributes of union types")
-        return self._nodes[0].attribute_hints
+        return self._main_node.attribute_hints
 
     @cached_property
     def init(self) -> "BoundFWrap[..., Any]":
         if self.union:
             raise TypeError("Cannot get __init__ of union types")
-        return self._nodes[0].init.bind(self)
+        return self._main_node.init.bind(self)
 
     @cached_property
     def signature(self) -> inspect.Signature:
         if self.union:
             raise TypeError("Cannot get signature of union types")
-        return inspect.signature(self._nodes[0].inner_type)
+        return self._main_node.signature
 
     @cached_property
     def parameters(self) -> dict[str, inspect.Parameter]:
@@ -478,65 +502,66 @@ class TWrap[T]:
     def inner_type(self) -> Any:
         if self.union:
             raise TypeError("Cannot get inner type of union types")
-        return self._nodes[0].inner_type
+        return self._main_node.inner_type
 
     @cached_property
     def generic_params(self) -> "tuple[TWrap[Any], ...]":
         if self.union:
             raise TypeError("Cannot get generic params of union types")
-        return self._nodes[0].generic_params
+        return self._main_node.generic_params
 
     def instantiate(self, /, *args: Any, **kwargs: Any) -> T:
         if self.union:
             raise TypeError("Cannot instantiate union types")
-        return self._nodes[0].instantiate(*args, **kwargs)
+        return self._main_node.instantiate(*args, **kwargs)
 
     def get_method(self, method_name: str) -> "BoundFWrap[..., Any]":
         if self.union:
             raise TypeError("Cannot get methods of union types")
-        if method_name in self._method_cache:
-            return self._method_cache[method_name]
-        return self._nodes[0].get_method(method_name).bind(self)
+        if method_name not in self._method_cache:
+            self._method_cache[method_name] = self._main_node.get_method(method_name).bind(self)
+        return self._method_cache[method_name]
 
-    def match(self, other: Any, *, match_mode: MatchMode = "exact") -> bool:
+    def match(self, other: Any, *, strict: bool = False, lineage: Lineage = "none") -> MatchResult:
         other_wrap: TWrap[Any]
         if isinstance(other, TWrap):
             other_wrap = cast(TWrap[Any], other)
         else:
             other_wrap = peritype.wrap_type(other)
 
+        best: MatchKind = "none"
         for a in self._nodes:
-            if a.match(other_wrap, match_mode=match_mode):
-                return True
-        return False
+            best = strongest_kind(best, a.match(other_wrap, lineage=lineage, strict=strict).kind)
+            if best == "exact":
+                break
+        return MatchResult(best)
 
-    def is_type_of(self, value: Any) -> TypeGuard[T]:
+    def matches(self, other: Any, *, strict: bool = False, lineage: Lineage = "none") -> bool:
+        return bool(self.match(other, strict=strict, lineage=lineage))
+
+    def is_type_of(self, value: Any, *, strict: bool = False) -> TypeGuard[T]:
         if WithOriginClass.match(value):
-            return self.match(peritype.wrap_type(value.__orig_class__), match_mode="sub")
+            return self.matches(peritype.wrap_type(value.__orig_class__), lineage="sub", strict=strict)
         value_type: type[Any] = cast(type[Any], type(value))
-        return self.match(peritype.wrap_type(value_type), match_mode="sub")
+        return self.matches(peritype.wrap_type(value_type), lineage="sub", strict=strict)
 
     def specialize_with(self, twrap: "TWrap[Any]") -> "TWrap[Any]":
+        members: list[Any] = []
         try:
-            new_nodes: list[TypeNode[Any]] = []
             for node in self._nodes:
-                new_params: list[TWrap[Any]] = []
-                for type_param in node.type_params:
-                    replacement = twrap.type_var_lookup.get_twrap(type_param, equivalent=self.type_var_lookup)
-                    new_params.append(replacement)
-                new_origin_params = tuple(p.inner_type for p in new_params)
-                new_origin = cast(Any, node.inner_type)[*new_origin_params]
-                new_nodes.append(TypeNode(new_origin, tuple(new_params), node.inner_type, new_origin_params))
-            new_origin = cast(Any, Union[*(n.origin for n in new_nodes)])  # pyright: ignore[reportDeprecated]
-            new_twrap = cast(
-                TWrap[Any],
-                TWrap(
-                    origin=new_origin,
-                    nodes=tuple(new_nodes),
-                    meta=self._meta,
-                ),
-            )
-            CACHE.set_twrap(new_twrap._origin, new_twrap)
-            return new_twrap
+                if not node.type_params:
+                    members.append(node.origin)
+                    continue
+                params = tuple(
+                    twrap.type_var_lookup.get_twrap(type_param, equivalent=self.type_var_lookup).origin
+                    for type_param in node.type_params
+                )
+                members.append(cast(Any, node.inner_type)[*params])
         except KeyError as e:
             raise IncompatibleTypesError(self._origin, twrap._origin) from e
+        origin: Any = cast(Any, Union[*members]) if len(members) > 1 else members[0]  # pyright: ignore[reportDeprecated]
+        if self._meta.annotated:
+            origin = Annotated[origin, *self._meta.annotated]
+        if not self._meta.required:
+            origin = NotRequired[origin]
+        return peritype.wrap_type(origin)

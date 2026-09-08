@@ -1,7 +1,9 @@
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Self
 
 from peritype import TWrap
+from peritype._twrap import Lineage
+from peritype.utils import MatchResult
 
 
 class TypeBag[T = Any]:
@@ -38,47 +40,47 @@ class TypeBag[T = Any]:
     def items(self) -> set[TWrap[T]]:
         return {*self._bag}
 
-    def first_matching_or_none(self, twrap: TWrap[T]) -> TWrap[T] | None:
+    def _candidates(self, twrap: TWrap[T], lineage: Lineage) -> set[TWrap[T]]:
+        if lineage != "none" or any(node.inner_type is Any for node in twrap.nodes):
+            return self._bag
+        candidates = set[TWrap[T]]()
+        for node in twrap.nodes:
+            candidates |= self._raw_types.get(node.inner_type, frozenset())
+        any_type: Any = Any
+        candidates |= self._raw_types.get(any_type, frozenset())
+        return candidates
+
+    def match_all(
+        self, twrap: TWrap[T], *, strict: bool = False, lineage: Lineage = "none"
+    ) -> dict[TWrap[T], MatchResult]:
+        results: dict[TWrap[T], MatchResult] = {}
+        for candidate in self._candidates(twrap, lineage):
+            result = twrap.match(candidate, strict=strict, lineage=lineage)
+            if result:
+                results[candidate] = result
+        return results
+
+    def best_matching_or_none(
+        self, twrap: TWrap[T], *, strict: bool = False, lineage: Lineage = "none"
+    ) -> TWrap[T] | None:
         if twrap in self._bag:
             return twrap
-        for node in twrap.nodes:
-            raw_type = node.inner_type
-            if raw_type in self._raw_types:
-                for wrap in self._raw_types[raw_type]:
-                    if twrap.match(wrap):
-                        return wrap
-        return None
+        results = self.match_all(twrap, strict=strict, lineage=lineage)
+        if not results:
+            return None
+        return max(results, key=results.__getitem__)
 
-    def first_matching(self, twrap: TWrap[T]) -> TWrap[T]:
-        result = self.first_matching_or_none(twrap)
+    def best_matching(self, twrap: TWrap[T], *, strict: bool = False, lineage: Lineage = "none") -> TWrap[T]:
+        result = self.best_matching_or_none(twrap, strict=strict, lineage=lineage)
         if result is None:
             raise KeyError(f"No matching type found for {twrap}")
         return result
 
-    def contains_matching(self, twrap: TWrap[T]) -> bool:
-        return self.first_matching_or_none(twrap) is not None
+    def contains_matching(self, twrap: TWrap[T], *, strict: bool = False, lineage: Lineage = "none") -> bool:
+        return self.best_matching_or_none(twrap, strict=strict, lineage=lineage) is not None
 
-    def get_all_matching(self, twrap: TWrap[T]) -> set[TWrap[T]]:
-        if not twrap.contains_any:
-            return {twrap} if twrap in self._bag else set()
-        result = set[TWrap[T]]()
-        for node in twrap.nodes:
-            raw_type = node.inner_type
-            if raw_type in self._raw_types:
-                for wrap in self._raw_types[raw_type]:
-                    if twrap.match(wrap):
-                        result.add(wrap)
-        return result
-
-    def get_all_submatching(self, twrap: TWrap[T]) -> set[TWrap[T]]:
-        result = set[TWrap[T]]()
-        for twrap_in_bag in self._bag:
-            if twrap.match(twrap_in_bag, match_mode="sub"):
-                result.add(twrap_in_bag)
-        return result
-
-    def copy(self) -> "TypeBag[T]":
-        new_bag = TypeBag[T]()
+    def copy(self) -> Self:
+        new_bag = type(self)()
         new_bag._bag = self._bag.copy()
         new_bag._raw_types = self._raw_types.copy()
         return new_bag

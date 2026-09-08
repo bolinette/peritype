@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from typing import Any, overload
+from typing import Any, Self, overload, override
 
 from peritype._twrap import TWrap
 
@@ -55,8 +55,8 @@ class TypeMap[K, V]:
     def add(self, twrap: TWrap[K], value: V, /) -> None:
         self._content[twrap] = value
 
-    def copy(self) -> "TypeMap[K, V]":
-        new_map = TypeMap[K, V]()
+    def copy(self) -> Self:
+        new_map = type(self)()
         new_map._content = self._content.copy()
         return new_map
 
@@ -71,3 +71,9 @@ class TypeSetMap[K, V](TypeMap[K, set[V]]):
         if twrap not in self._content:
             return 0
         return len(self._content[twrap])
+
+    @override
+    def copy(self) -> Self:
+        new_map = type(self)()
+        new_map._content = {twrap: set(values) for twrap, values in self._content.items()}
+        return new_map
