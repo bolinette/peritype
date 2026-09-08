@@ -542,7 +542,11 @@ def test_specialize_twrap() -> None:
     super_any = wrap_type(GenericType[Any])
     sub_int = wrap_type(SubType[int])
 
-    assert super_any.specialize_with(sub_int) is wrap_type(GenericType[int])
+    super_int = super_any.specialize_with(sub_int)
+    assert super_int is wrap_type(GenericType[int])
+    assert super_int is not wrap_type(GenericType[str])
+    assert super_int.origin == GenericType[int]
+    assert super_int.origin != GenericType[str]
 
 
 def test_reverse_specialize_twrap() -> None:
@@ -555,7 +559,11 @@ def test_reverse_specialize_twrap() -> None:
     super_int = wrap_type(GenericType[int])
     sub_any = wrap_type(SubType[Any])
 
-    assert sub_any.specialize_with(super_int) is wrap_type(SubType[int])
+    sub_int = sub_any.specialize_with(super_int)
+    assert sub_int is wrap_type(SubType[int])
+    assert sub_int is not wrap_type(SubType[str])
+    assert sub_int.origin == SubType[int]
+    assert sub_int.origin != SubType[str]
 
 
 def test_specialize_twrap_three_levels() -> None:

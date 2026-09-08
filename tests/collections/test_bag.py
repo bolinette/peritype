@@ -197,3 +197,18 @@ def test_copy() -> None:
     assert len(bag_copy) == 3
     assert twrap_float not in bag
     assert twrap_float in bag_copy
+
+
+def test_typed_type_bag() -> None:
+    b1 = TypeBag[int]()
+
+    b1.add(wrap_type(int))
+    assert wrap_type(int) in b1
+    assert wrap_type(bool) not in b1
+
+    b1.add(wrap_type(bool))
+    assert wrap_type(int) in b1
+    assert wrap_type(bool) in b1
+
+    # pyright SHOULD report that usage
+    b1.add(wrap_type(str))  # pyright: ignore[reportArgumentType]
