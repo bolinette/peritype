@@ -288,6 +288,36 @@ class TestAnnotated:
         assert wrap_type(Annotated[Annotated[int, "inner"], "outer"]).annotations == ("inner", "outer")
 
 
+class TestValueType:
+    def test_plain_types_are_unchanged(self) -> None:
+        assert wrap_type(int).value_type is int
+        assert wrap_type(list[int]).value_type == list[int]
+        assert wrap_type(int | None).value_type == int | None
+
+    def test_qualifiers_are_stripped(self) -> None:
+        assert wrap_type(NotRequired[int]).value_type is int
+        assert wrap_type(Required[int | None]).value_type == int | None
+        assert wrap_type(ReadOnly[str]).value_type is str
+        assert wrap_type(ClassVar[str]).value_type is str
+        assert wrap_type(Final[str]).value_type is str
+        assert wrap_type(NotRequired[ReadOnly[str]]).value_type is str
+
+    def test_bare_qualifiers_become_any(self) -> None:
+        assert wrap_type(ClassVar).value_type is Any
+        assert wrap_type(Final).value_type is Any
+
+    def test_annotated_is_kept(self) -> None:
+        assert wrap_type(Annotated[int, "a"]).value_type == Annotated[int, "a"]
+        assert wrap_type(NotRequired[Annotated[int, "a"]]).value_type == Annotated[int, "a"]
+        assert wrap_type(Annotated[NotRequired[int], "a"]).value_type == Annotated[int, "a"]
+
+    def test_typed_dict_attributes(self) -> None:
+        attrs = wrap_type(Complete).attribute_hints
+        assert attrs["x"].value_type is int
+        assert attrs["y"].origin == NotRequired[str]
+        assert attrs["y"].value_type is str
+
+
 class TestTypedDict:
     def test_total(self) -> None:
         assert wrap_type(Complete).total

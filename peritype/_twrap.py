@@ -437,6 +437,12 @@ class TWrap[T]:
     def origin(self) -> type[T]:
         return self._origin
 
+    @cached_property
+    def value_type(self) -> Any:
+        from peritype.utils._generics import strip_qualifiers
+
+        return strip_qualifiers(self._origin)
+
     @property
     def required(self) -> bool:
         return self._meta.required

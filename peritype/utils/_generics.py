@@ -50,6 +50,19 @@ def unpack_annotations(cls: Any, meta: TWrapMeta) -> Any:
     return cls
 
 
+def strip_qualifiers(cls: Any) -> Any:
+    origin = get_origin(cls)
+    if origin in (NotRequired, Required, ReadOnly, ClassVar, Final):
+        return strip_qualifiers(get_args(cls)[0])
+    if origin is Annotated:
+        inner, *annotated = get_args(cls)
+        stripped = strip_qualifiers(inner)
+        return cls if stripped is inner else Annotated[stripped, *annotated]
+    if cls is ClassVar or cls is Final:
+        return Any
+    return cls
+
+
 def unpack_members(cls: Any, meta: TWrapMeta) -> tuple[Any, ...]:
     unpacked = unpack_annotations(cls, meta)
     if get_origin(unpacked) in (UnionType, Union):  # pyright: ignore[reportDeprecated]

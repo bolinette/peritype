@@ -43,6 +43,7 @@ Optional types are not considered unions: `int | None` has `nullable` set and `u
 
 `Annotated` arguments, `NotRequired`/`Required` markers and `TypedDict` totality are not part of the nodes.
 They are stored on the wrapper and available through `annotations`, `required` and `total`.
+`origin` is the type exactly as it was wrapped, and `value_type` is that type without the `Required`, `NotRequired`, `ReadOnly`, `ClassVar` and `Final` qualifiers, for tools that expect a plain type such as `pydantic.TypeAdapter`.
 
 Wrapping the same type twice returns the same wrapper, and different spellings of the same type (`Optional[int]` and `int | None`) compare equal.
 The cache can be disabled with `peritype.utils.use_cache(False)`.
@@ -130,6 +131,8 @@ assert attrs["x"].matches(int)
 assert attrs["y"].matches(str)
 assert attrs["x"].required
 assert not attrs["y"].required
+assert attrs["y"].origin == NotRequired[str]
+assert attrs["y"].value_type is str
 ```
 
 `inner_type`, `generic_params`, `attribute_hints`, `init`, `get_method` and `instantiate` only make sense on a single type, and raise a `TypeError` on unions like `int | str`.
