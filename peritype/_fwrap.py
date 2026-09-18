@@ -120,7 +120,7 @@ class FWrap[**FuncP, FuncT]:
             return self
         if len(params) != len(self.type_params):
             raise ValueError("Number of specialization parameters does not match number of type parameters")
-        lookup = {tv: p for tv, p in zip(self.type_params, params, strict=True)}
+        lookup = dict(zip(self.type_params, params, strict=True))
         origin_lookup = {tv: p.origin for tv, p in lookup.items()}
         return FWrap(self.func, lookup=TypeVarLookup(origin_lookup, lookup))
 
@@ -129,8 +129,8 @@ class FWrap[**FuncP, FuncT]:
         from peritype._twrap import TypeVarLookup
 
         wrap_any = wrap_type(Any)
-        origin_lookup = {tv: Any for tv in self.type_params}
-        twrap_lookup = {tv: wrap_any for tv in self.type_params}
+        origin_lookup = dict.fromkeys(self.type_params, Any)
+        twrap_lookup = dict.fromkeys(self.type_params, wrap_any)
         return FWrap(self.func, TypeVarLookup(origin_lookup, twrap_lookup))
 
     def specialize_from_return(self, return_type: TWrap[FuncT]) -> "FWrap[FuncP, FuncT]":

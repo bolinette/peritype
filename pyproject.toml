@@ -3,6 +3,9 @@ name = "peritype"
 version = "0.8.0"
 description = "Peritype helps you explore Python types at runtime with ease."
 readme = "README.md"
+authors = [{ name = "Pierre Chat", email = "pierrechat@outlook.com" }]
+license = "MIT"
+license-files = ["LICENSE.txt"]
 requires-python = ">=3.13"
 dependencies = []
 
@@ -15,10 +18,7 @@ package = "peritype"
 module-root = ""
 
 [dependency-groups]
-dev = [
-    "pyright>=1.1.400",
-    "ruff>=0.14.11",
-]
+dev = ["pyright>=1.1.414", "ruff>=0.16.8"]
 test = ["pytest>=9.0.2", "pytest-cov>=7.0.0"]
 
 [tool.ruff]
@@ -26,7 +26,37 @@ line-length = 120
 src = [""]
 
 [tool.ruff.lint]
-extend-select = ["E", "W", "F", "B", "Q", "I", "N", "RUF", "UP"]
+extend-select = [
+    "E",
+    "W",
+    "F",
+    "B",
+    "Q",
+    "I",
+    "N",
+    "RUF",
+    "UP",
+    "BLE",
+    "DTZ",
+    "ERA",
+    "FLY",
+    "FURB",
+    "LOG",
+    "PIE",
+    "PLE",
+    "SLOT",
+    "TID",
+    "YTT",
+    "ASYNC",
+    "C4",
+    "G",
+    "PERF",
+    "PGH",
+    "PT",
+    "RET",
+    "RSE",
+    "T20",
+]
 fixable = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]

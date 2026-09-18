@@ -3,6 +3,8 @@
 Peritype helps you navigate Python types and annotations at runtime with ease.
 It provides a standard interface to inspect the mess of types, generics, `TypeVar`s, `Annotated`s, and more.
 
+Peritype is used by the [Bolinette project](https://github.com/bolinette) to resolve the dependencies of a service, the fields of a mapped object and the parameters of a route.
+
 Peritype is designed to be lightweight and dependency-free.
 It uses a built-in type wrapper to provide a consistent interface for inspecting types, their attributes, methods, and signature hints.
 The wrappers are cached by default to improve performance and avoid redundant computations.
@@ -10,11 +12,13 @@ The wrappers are cached by default to improve performance and avoid redundant co
 ```python
 from peritype import wrap_type
 
+
 class Repository[T]:
     items: list[T]
 
     def get(self, index: int) -> T:
         return self.items[index]
+
 
 wrapped = wrap_type(Repository[int])
 
@@ -56,6 +60,7 @@ Wrappers can also be used to check if a type matches another type, including uni
 ```python
 from peritype import wrap_type
 
+
 class MyClass:
     attr: int
 
@@ -66,6 +71,7 @@ class MyClass:
     def my_method(self, z: float) -> bool:
         return z > 0.0
 
+
 wrapped = wrap_type(MyClass)
 
 # Test if the type can match another type
@@ -74,17 +80,17 @@ assert not wrapped.matches(int)
 
 # Access attribute type hints
 hints = wrapped.attribute_hints
-assert hints['attr'].matches(int)
+assert hints["attr"].matches(int)
 
 # Access the __init__ method's signature hints
 init_signature = wrapped.init.get_signature_hints()
-assert init_signature['x'].matches(int)
-assert init_signature['y'].matches(str)
+assert init_signature["x"].matches(int)
+assert init_signature["y"].matches(str)
 
 # Access method signatures
-method_wrap = wrapped.get_method('my_method')
+method_wrap = wrapped.get_method("my_method")
 method_signature = method_wrap.get_signature_hints()
-assert method_signature['z'].matches(float)
+assert method_signature["z"].matches(float)
 assert method_wrap.get_return_hint().matches(bool)
 ```
 
@@ -96,8 +102,8 @@ from peritype import wrap_type
 
 type Names = list[str]
 
-assert wrap_type(list) == wrap_type(list[Any])       # missing type parameters default to Any
-assert wrap_type(Names) == wrap_type(list[str])      # type aliases are resolved to their value
+assert wrap_type(list) == wrap_type(list[Any])  # missing type parameters default to Any
+assert wrap_type(Names) == wrap_type(list[str])  # type aliases are resolved to their value
 assert str(wrap_type(dict[str, list[int]])) == "dict[str, list[int]]"
 assert wrap_type(dict[str, list[int]]).generic_params[1].matches(list[int])
 ```
@@ -119,9 +125,11 @@ assert annotated_wrap.nullable  # None in the union
 assert not annotated_wrap.union  # int | None is not considered a union, the None part is handled separately
 assert annotated_wrap.annotations == ("metadata",)
 
+
 class MyTypedDict(TypedDict, total=False):
     x: int
     y: NotRequired[str]
+
 
 typed_dict_wrap = wrap_type(MyTypedDict)
 assert not typed_dict_wrap.total
@@ -183,8 +191,12 @@ With `lineage="super"`, the wrapped type also matches its parent types, with `"s
 ```python
 from peritype import wrap_type
 
+
 class Animal[T]: ...
+
+
 class Dog(Animal[str]): ...
+
 
 assert not wrap_type(Dog).matches(Animal[str])
 assert wrap_type(Dog).match(Animal[str], lineage="super").is_lineage
@@ -194,7 +206,7 @@ assert wrap_type(Dog).match(Animal[int], lineage="super").is_none
 
 ### Base classes
 
-`iter_bases` yields the ancestors of a wrapped type, with a an `order` parameter to suite your needs.
+`iter_bases` yields the ancestors of a wrapped type, with an `order` parameter to suit your needs.
 The default `"bfs"` order yields the closest ancestors first, `"dfs"` follows each branch to its end, and `"mro"` uses the class linearization.
 The bases of a type are its `__orig_bases__`, so `"bfs"` and `"dfs"` stop where the generic machinery does and never reach `object` through a generic class, while `"mro"` is complete.
 The wrapper itself is never yielded, and a base reached twice is yielded once.
@@ -203,9 +215,15 @@ The wrapper itself is never yielded, and a base reached twice is yielded once.
 from typing import Any
 from peritype import wrap_type
 
+
 class Animal[T]: ...
+
+
 class Pet[T](Animal[T]): ...
+
+
 class Dog(Pet[str]): ...
+
 
 assert list(wrap_type(Dog).iter_bases()) == [wrap_type(Pet[str]), wrap_type(Animal[str])]
 assert list(wrap_type(Dog).iter_bases(order="mro"))[-1] == wrap_type(object)
@@ -223,8 +241,12 @@ Instances created from a parameterized class (`Animal[str]()`) keep their type p
 ```python
 from peritype import wrap_type
 
+
 class Animal[T]: ...
+
+
 class Dog(Animal[str]): ...
+
 
 assert wrap_type(Animal[str]).is_type_of(Dog())
 assert wrap_type(Animal[str]).is_type_of(Animal[str]())
@@ -240,26 +262,27 @@ Python generics can be tricky to work with at runtime, but `peritype` provides a
 ```python
 from peritype import wrap_type
 
+
 class GenericParent[T]:
     value: T
 
-    def get_value(self) -> T:
-        ...
+    def get_value(self) -> T: ...
+
 
 class GenericChild[T, U](GenericParent[U]):
-    def get_other_value(self) -> T:
-        ...
+    def get_other_value(self) -> T: ...
+
 
 wrapped_child = wrap_type(GenericChild[int, str])
 
 # Access attributes with resolved generics
-assert wrapped_child.attribute_hints['value'].matches(str)
+assert wrapped_child.attribute_hints["value"].matches(str)
 
 # Access method signatures with resolved generics
-get_value_wrap = wrapped_child.get_method('get_value')
+get_value_wrap = wrapped_child.get_method("get_value")
 assert get_value_wrap.get_return_hint().matches(str)
 
-get_other_value_wrap = wrapped_child.get_method('get_other_value')
+get_other_value_wrap = wrapped_child.get_method("get_other_value")
 assert get_other_value_wrap.get_return_hint().matches(int)
 ```
 
@@ -269,8 +292,12 @@ A generic class wrapped without parameters gets `Any` for each of them.
 ```python
 from peritype import wrap_type
 
+
 class Box[T]: ...
+
+
 class SubBox[T](Box[T]): ...
+
 
 assert wrap_type(SubBox).specialize_with(wrap_type(Box[int])) == wrap_type(SubBox[int])
 assert wrap_type(Box).specialize_with(wrap_type(SubBox[int])) == wrap_type(Box[int])
@@ -281,15 +308,17 @@ assert wrap_type(Box).specialize_with(wrap_type(SubBox[int])) == wrap_type(Box[i
 ```python
 from peritype import wrap_func
 
+
 def my_function(a: int, b: str) -> bool:
     return str(a) == b
+
 
 wrapped_func = wrap_func(my_function)
 
 # Access function signature hints
 signature_hints = wrapped_func.get_signature_hints()
-assert signature_hints['a'].matches(int)
-assert signature_hints['b'].matches(str)
+assert signature_hints["a"].matches(int)
+assert signature_hints["b"].matches(str)
 assert wrapped_func.get_signature_hint(0).matches(int)
 assert wrapped_func.get_return_hint().matches(bool)
 assert wrapped_func(1, "1")
@@ -301,17 +330,19 @@ The hints of a generic function cannot be read until its `TypeVar`s are given a 
 from typing import Any
 from peritype import wrap_func, wrap_type
 
+
 def first[T](items: list[T]) -> T:
     return items[0]
+
 
 wrapped_func = wrap_func(first)
 assert wrapped_func.is_generic and not wrapped_func.is_defined
 
 specialized = wrapped_func.specialize([wrap_type(int)])
-assert specialized.get_signature_hints()['items'].matches(list[int])
+assert specialized.get_signature_hints()["items"].matches(list[int])
 
 from_return = wrapped_func.specialize_from_return(wrap_type(str))
-assert from_return.get_signature_hints()['items'].matches(list[str])
+assert from_return.get_signature_hints()["items"].matches(list[str])
 
 assert wrapped_func.unspecialize().get_return_hint().matches(Any)
 ```
@@ -345,8 +376,12 @@ assert handlers[wrap_type(None | int)] == "optional int"  # equal wrappers are t
 from peritype import wrap_type
 from peritype.collections import TypeSuperTree
 
+
 class Animal[T]: ...
+
+
 class Dog(Animal[str]): ...
+
 
 tree = TypeSuperTree()
 tree.add(wrap_type(Dog))
@@ -383,3 +418,7 @@ All errors derive from `peritype.errors.PeritypeError`.
 | `UnresolvedForwardRefError`       | A string annotation cannot be resolved                    |
 | `IncompatibleTypesError`          | `specialize_with` is given a wrap of an unrelated family  |
 | `UnresolvedFunctionTypeVarsError` | `specialize_from_return` cannot infer every type variable |
+
+## License
+
+Peritype is released under the MIT license, see [LICENSE.txt](LICENSE.txt).
