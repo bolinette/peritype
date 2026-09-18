@@ -1,4 +1,5 @@
 import inspect
+from collections import deque
 from collections.abc import Iterator
 from functools import cached_property
 from types import NoneType, get_original_bases
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from peritype._fwrap import BoundFWrap, FWrap
 
 type Lineage = Literal["none", "super", "sub", "both"]
+type BaseOrder = Literal["bfs", "dfs", "mro"]
 
 
 class TWrapMeta:
@@ -146,6 +148,10 @@ class TypeVarLookup:
         raise KeyError(type_var)
 
 
+def _is_class_base(base: Any) -> bool:
+    return isinstance(base, type) or get_origin(base) is not None
+
+
 class TypeNode[T]:
     def __init__(
         self,
@@ -251,18 +257,24 @@ class TypeNode[T]:
             or ()
         )
 
+    def _origin_bases(self) -> tuple[Any, ...]:
+        try:
+            origin_bases: tuple[Any, ...] = get_original_bases(self._inner_type)
+        except TypeError:
+            return ()
+        if all(_is_class_base(base) for base in origin_bases):
+            return origin_bases
+        runtime_bases: tuple[type[Any], ...] = getattr(self._inner_type, "__bases__", ())
+        return runtime_bases
+
     def _get_bases_and_type_var_lookup(self) -> "tuple[tuple['TWrap[Any]', ...], TypeVarLookup]":
         bases: list[TWrap[Any]] = []
         type_params = self.type_params
         origin_lookup = dict(zip(type_params, self._origin_params, strict=True)) if type_params else {}
         twrap_lookup = dict(zip(type_params, self._generic_params, strict=True)) if type_params else {}
         lookup = TypeVarLookup(origin_lookup, twrap_lookup)
-        try:
-            origin_bases: tuple[type[Any], ...] = get_original_bases(self._inner_type)
-        except TypeError:
-            origin_bases = ()
-        for base in origin_bases:
-            if get_origin(base) in (Generic, Protocol):
+        for base in self._origin_bases():
+            if base in (Generic, Protocol) or get_origin(base) in (Generic, Protocol):
                 continue
             lookup.set_equivalents(base)
             base_wrap = peritype.wrap_type(base, lookup=lookup)
@@ -335,6 +347,48 @@ class TypeNode[T]:
 
     def matches(self, other: "TWrap[Any]", *, strict: bool = False, lineage: Lineage = "none") -> bool:
         return bool(self.match(other, strict=strict, lineage=lineage))
+
+    def iter_bases(self, *, order: BaseOrder = "bfs") -> "Iterator[TWrap[Any]]":
+        match order:
+            case "bfs":
+                yield from self._iter_bases_bfs()
+            case "dfs":
+                yield from self._iter_bases_dfs(set())
+            case "mro":
+                yield from self._iter_bases_mro()
+
+    def _iter_bases_bfs(self) -> "Iterator[TWrap[Any]]":
+        queue: deque[TWrap[Any]] = deque(self.bases)
+        seen: set[TWrap[Any]] = set()
+        while queue:
+            base = queue.popleft()
+            if base in seen:
+                continue
+            seen.add(base)
+            yield base
+            for node in base.nodes:
+                queue.extend(node.bases)
+
+    def _iter_bases_dfs(self, seen: "set[TWrap[Any]]") -> "Iterator[TWrap[Any]]":
+        for base in self.bases:
+            if base in seen:
+                continue
+            seen.add(base)
+            yield base
+            for node in base.nodes:
+                yield from node._iter_bases_dfs(seen)
+
+    def _iter_bases_mro(self) -> "Iterator[TWrap[Any]]":
+        resolved: dict[type[Any], TWrap[Any]] = {}
+        for base in self._iter_bases_bfs():
+            for node in base.nodes:
+                resolved.setdefault(node.inner_type, base)
+        mro: tuple[type[Any], ...] = getattr(self._inner_type, "__mro__", ())
+        for cls in mro[1:]:
+            if cls in (Generic, Protocol):
+                continue
+            base = resolved.get(cls)
+            yield base if base is not None else peritype.wrap_type(cls)
 
     def _match_super(self, b: "TypeNode[Any]", strict: bool) -> MatchKind:
         best: MatchKind = "none"
@@ -544,6 +598,22 @@ class TWrap[T]:
 
     def matches(self, other: Any, *, strict: bool = False, lineage: Lineage = "none") -> bool:
         return bool(self.match(other, strict=strict, lineage=lineage))
+
+    def iter_bases(self, *, order: BaseOrder = "bfs") -> "Iterator[TWrap[Any]]":
+        """Walk the ancestors of every node of this wrapper, with their type parameters resolved.
+
+        The bases of a node are its ``__orig_bases__``, so ``"bfs"`` and ``"dfs"`` stop where the
+        generic machinery does and never reach ``object`` through a generic class. ``"mro"`` follows
+        the class linearization instead, which is complete, and fills in the specializations found
+        along the way. The wrapper itself is never yielded, and a base reached twice is yielded once.
+        """
+        seen: set[TWrap[Any]] = set()
+        for node in self._nodes:
+            for base in node.iter_bases(order=order):
+                if base in seen:
+                    continue
+                seen.add(base)
+                yield base
 
     def is_type_of(self, value: Any, *, strict: bool = False) -> TypeGuard[T]:
         if WithOriginClass.match(value):

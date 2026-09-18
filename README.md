@@ -192,6 +192,29 @@ assert wrap_type(Animal[str]).match(Dog, lineage="sub").is_lineage
 assert wrap_type(Dog).match(Animal[int], lineage="super").is_none
 ```
 
+### Base classes
+
+`iter_bases` yields the ancestors of a wrapped type, with a an `order` parameter to suite your needs.
+The default `"bfs"` order yields the closest ancestors first, `"dfs"` follows each branch to its end, and `"mro"` uses the class linearization.
+The bases of a type are its `__orig_bases__`, so `"bfs"` and `"dfs"` stop where the generic machinery does and never reach `object` through a generic class, while `"mro"` is complete.
+The wrapper itself is never yielded, and a base reached twice is yielded once.
+
+```python
+from typing import Any
+from peritype import wrap_type
+
+class Animal[T]: ...
+class Pet[T](Animal[T]): ...
+class Dog(Pet[str]): ...
+
+assert list(wrap_type(Dog).iter_bases()) == [wrap_type(Pet[str]), wrap_type(Animal[str])]
+assert list(wrap_type(Dog).iter_bases(order="mro"))[-1] == wrap_type(object)
+
+# Find the ancestor a type specializes, with its parameters
+base = next(b for b in wrap_type(Dog).iter_bases() if b.matches(Animal[Any]))
+assert base.generic_params == (wrap_type(str),)
+```
+
 ### Checking values
 
 `is_type_of` checks a value against the wrapper, like `isinstance` would, including subclasses.
@@ -344,6 +367,8 @@ assert wrap_type(Animal[int]) not in tree
 | `type` aliases, generic aliases                                         | Expanded to their value                                                            |
 | `Literal[...]`                                                          | Values are compared by type and value, a literal does not match its base type      |
 | `Callable[[A], R]`, `ParamSpec`, `...`                                  | Parameter lists are matched position by position, `...` matches any of them        |
+| `NamedTuple` and `TypedDict` subclasses                                 | Walked through their runtime base, `tuple` or `dict`                               |
+| `Protocol`, `Generic`                                                   | Never reported as a base, the protocol or generic class itself is                  |
 | Bare `TypeVar`, forward references                                      | Raise an error unless resolved through a parameterized class or an explicit lookup |
 
 Not supported yet: tuple variadics (`tuple[int, ...]` is not matched against `tuple[int, int]`), structural matching of `Protocol`s, `TypeVar` bounds and variance, `NewType`, `Self`, and `functools.partial` or callable objects in `wrap_func`.
